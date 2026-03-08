@@ -2,7 +2,7 @@
   "productName": "BloatSQL",
   "identifier": "com.bloatsql.app",
   "build": {
-    "beforeDevCommand": "npm run dev:vite",
+    "beforeDevCommand": "bun run dev:vite",
     "beforeBuildCommand": "vite build",
     "devUrl": "http://localhost:5174",
     "frontendDist": "../dist"
