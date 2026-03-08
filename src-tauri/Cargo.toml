@@ -1,6 +1,6 @@
 [package]
 name = "bloat-sql"
-version = "0.0.6-alpha.2"
+version = "0.0.7-alpha.1"
 description = "BloatSQL - Database Client"
 authors = ["you"]
 edition = "2021"
