@@ -14,6 +14,7 @@
   "dependencies": {
     "@gfazioli/mantine-led": "^1.0.1",
     "@mantine/core": "9.0.0-alpha.4",
+    "@mantine/dates": "^8.3.16",
     "@mantine/form": "9.0.0-alpha.4",
     "@mantine/hooks": "9.0.0-alpha.4",
     "@mantine/notifications": "9.0.0-alpha.4",
