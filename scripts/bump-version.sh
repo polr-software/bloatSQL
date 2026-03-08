@@ -15,12 +15,22 @@ fi
 
 echo "Bumping version to $VERSION..."
 
-# package.json
-sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
+# package.json - użyj node żeby uniknąć problemów z CRLF na Windows
+node -e "
+const fs = require('fs');
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+pkg.version = '$VERSION';
+fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+"
 echo "  ✓ package.json"
 
-# Cargo.toml
-sed -i "s/^version = \".*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+# Cargo.toml - użyj node zamiast sed
+node -e "
+const fs = require('fs');
+let cargo = fs.readFileSync('src-tauri/Cargo.toml', 'utf8');
+cargo = cargo.replace(/^version = \".*\"/m, 'version = \"$VERSION\"');
+fs.writeFileSync('src-tauri/Cargo.toml', cargo);
+"
 echo "  ✓ src-tauri/Cargo.toml"
 
 # Commit i tag
