@@ -48,6 +48,12 @@ interface QueryActions {
 
 type QueryStore = QueryState & QueryActions;
 
+function parseError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'Unknown error';
+}
+
 function formatTableName(tableName: string, dbType: DatabaseType | undefined): string {
   if (!dbType) return tableName;
 
@@ -97,9 +103,8 @@ export const useQueryStore = create<QueryStore>((set, get) => ({
         tableColumns: [],
       });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Query execution failed';
       set({
-        error: errorMsg,
+        error: parseError(error),
         isExecuting: false,
       });
     }
@@ -121,8 +126,7 @@ export const useQueryStore = create<QueryStore>((set, get) => ({
         tableColumns: [],
       });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Query execution failed';
-      set({ error: errorMsg, isExecuting: false });
+      set({ error: parseError(error), isExecuting: false });
     }
   },
 
@@ -132,9 +136,8 @@ export const useQueryStore = create<QueryStore>((set, get) => ({
       const tables = await tauriCommands.listTables();
       set({ tables, isLoadingTables: false });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Failed to load tables';
       set({
-        error: errorMsg,
+        error: parseError(error),
         isLoadingTables: false,
       });
     }
@@ -153,9 +156,8 @@ export const useQueryStore = create<QueryStore>((set, get) => ({
         await get().loadTables();
       }
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Failed to load databases';
       set({
-        error: errorMsg,
+        error: parseError(error),
         isLoadingDatabases: false,
       });
     }
@@ -182,9 +184,8 @@ export const useQueryStore = create<QueryStore>((set, get) => ({
       const tables = await tauriCommands.listTables();
       set({ tables, isLoadingTables: false, loadedTable: null, tableColumns: [], results: null });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Failed to change database';
       set({
-        error: errorMsg,
+        error: parseError(error),
         isLoadingTables: false,
       });
     }
@@ -224,9 +225,8 @@ export const useQueryStore = create<QueryStore>((set, get) => ({
         tableColumns: columns,
       });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Query execution failed';
       set({
-        error: errorMsg,
+        error: parseError(error),
         isExecuting: false,
         results: null,
         loadedTable: null,
@@ -255,9 +255,8 @@ export const useQueryStore = create<QueryStore>((set, get) => ({
         lastExecutionTime: results.executionTime,
       });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Failed to refresh table';
       set({
-        error: errorMsg,
+        error: parseError(error),
         isExecuting: false,
       });
     }

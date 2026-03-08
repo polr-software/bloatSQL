@@ -1,9 +1,23 @@
-import { ReactNode } from 'react';
-import { MantineProvider, createTheme } from '@mantine/core';
+import { ReactNode, useEffect } from 'react';
+import { MantineProvider, createTheme, useMantineColorScheme } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
+import { DatesProvider } from '@mantine/dates';
 import { TauriProvider } from './tauri/TauriProvider';
 import { ErrorBoundary } from './components/modals';
-import { useSettingsStore } from './stores/settingsStore';
+import { useColorScheme, useSettingsStore } from './stores/settingsStore';
+import '@mantine/core/styles.css';
+import '@mantine/dates/styles.css';
+
+function ColorSchemeSync() {
+  const { setColorScheme } = useMantineColorScheme();
+  const colorScheme = useColorScheme();
+
+  useEffect(() => {
+    setColorScheme(colorScheme);
+  }, [colorScheme, setColorScheme]);
+
+  return null;
+}
 
 interface ProvidersProps {
   children: ReactNode;
@@ -19,7 +33,7 @@ export function Providers({ children }: ProvidersProps) {
       Tooltip: {
         defaultProps: {
           bg: 'var(--mantine-color-default)',
-          arrowSize: 8, 
+          arrowSize: 8,
         },
         styles: {
           tooltip: {
@@ -36,11 +50,14 @@ export function Providers({ children }: ProvidersProps) {
 
   return (
     <TauriProvider>
-      <MantineProvider theme={theme} defaultColorScheme={colorScheme} forceColorScheme={colorScheme === 'auto' ? undefined : colorScheme}>
-        <Notifications position="top-right" />
-        <ErrorBoundary>
-          {children}
-        </ErrorBoundary>
+      <MantineProvider theme={theme} defaultColorScheme={colorScheme}>
+        <DatesProvider settings={{ firstDayOfWeek: 1 }}>
+          <ColorSchemeSync />
+          <Notifications position="top-right" />
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
+        </DatesProvider>
       </MantineProvider>
     </TauriProvider>
   );

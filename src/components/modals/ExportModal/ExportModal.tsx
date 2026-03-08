@@ -1,5 +1,6 @@
 import { Modal } from '@mantine/core';
-import { ExportForm } from './ExportForm';
+import { DatabaseExportForm } from './DatabaseExportForm';
+import { RowExportForm } from './RowExportForm';
 
 interface ExportModalProps {
   opened: boolean;
@@ -29,7 +30,11 @@ export function ExportModal({ opened, onClose, databaseName, rowData }: ExportMo
         blur: 3,
       }}
     >
-      <ExportForm databaseName={databaseName} onSuccess={onClose} rowData={rowData} />
+      {isRowExport ? (
+        <RowExportForm rowData={rowData} onSuccess={onClose} />
+      ) : (
+        <DatabaseExportForm databaseName={databaseName} onSuccess={onClose} />
+      )}
     </Modal>
   );
 }

@@ -9,6 +9,7 @@ export interface CellEditData {
   tableName: string | null;
   primaryKeyColumn?: string;
   primaryKeyValue?: unknown;
+  columns?: TableColumn[];
 }
 
 interface EditCellState {

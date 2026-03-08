@@ -3,8 +3,6 @@ import {
   AppShell,
   Stack,
   Text,
-  Textarea,
-  TextInput,
   Button,
   Group,
   Badge,
@@ -12,6 +10,7 @@ import {
   Title,
   ScrollArea,
 } from '@mantine/core';
+import { SmartColumnInput } from './SmartColumnInput';
 import { useForm } from '@mantine/form';
 import { IconCheck, IconX, IconAlertCircle, IconDeviceFloppy } from '@tabler/icons-react';
 import {
@@ -39,13 +38,6 @@ function isMultilineValue(value: unknown): boolean {
   return value.length > 100 || value.includes('\n');
 }
 
-const inputStyles = {
-  input: {
-    fontFamily: 'monospace',
-    fontSize: 'var(--mantine-font-size-sm)',
-  },
-};
-
 export function CellEditForm() {
   const selectedCell = useSelectedCell();
   const clearSelection = useClearCellSelection();
@@ -54,7 +46,6 @@ export function CellEditForm() {
   const error = useEditCellError();
   const setError = useSetEditCellError();
   const inputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showSaved, setShowSaved] = useState(false);
 
   const initialFormValues = selectedCell
@@ -80,9 +71,8 @@ export function CellEditForm() {
       setShowSaved(false);
 
       setTimeout(() => {
-        const activeRef = inputRef.current ?? textareaRef.current;
-        activeRef?.focus();
-        activeRef?.select();
+        inputRef.current?.focus();
+        inputRef.current?.select();
       }, 100);
     }
   }, [selectedCell]);
@@ -157,14 +147,16 @@ export function CellEditForm() {
     return null;
   }
 
-  const columns = Object.keys(selectedCell.rowData);
+  const columnNames = Object.keys(selectedCell.rowData);
+  const columnMeta = selectedCell.columns ?? [];
   const isDirty = form.isDirty();
 
-  const renderLabel = (columnName: string, isPrimaryKey: boolean, isFocused: boolean) => (
+  const renderLabel = (columnName: string, isPrimaryKey: boolean, isFocused: boolean, dataType?: string) => (
     <Group gap={4}>
       <Text size="sm">{columnName}</Text>
       {isPrimaryKey && <Badge size="xs" variant="light" color="yellow">PK</Badge>}
-      {isFocused && <Badge size="xs" variant="light" >Focused</Badge>}
+      {isFocused && <Badge size="xs" variant="light">Focused</Badge>}
+      {dataType && <Badge size="xs" variant="light" color="dimmed">{dataType}</Badge>}
     </Group>
   );
 
@@ -173,7 +165,7 @@ export function CellEditForm() {
       <AppShell.Section>
         <Title order={4} mb="xs">Edit Row</Title>
         <Group gap="xs" mb="md">
-          <Badge variant="light" >Row {selectedCell.rowIndex + 1}</Badge>
+          <Badge variant="light">Row {selectedCell.rowIndex + 1}</Badge>
           {selectedCell.tableName && (
             <Badge variant="light" color="gray">{selectedCell.tableName}</Badge>
           )}
@@ -203,34 +195,25 @@ export function CellEditForm() {
       <AppShell.Section grow component={ScrollArea} type="hover">
         <form onSubmit={form.onSubmit(handleSubmit)}>
           <Stack gap="md">
-            {columns.map((columnName) => {
-              const value = selectedCell.rowData[columnName];
+            {columnNames.map((columnName) => {
+              const rawValue = selectedCell.rowData[columnName];
               const isFocused = columnName === selectedCell.focusedColumn;
-              const isMultiline = isMultilineValue(value);
               const isPrimaryKey = columnName === selectedCell.primaryKeyColumn;
+              const col = columnMeta.find((c) => c.name === columnName);
+              const dataType = col?.dataType ?? '';
+              const isMultiline = !dataType && isMultilineValue(rawValue);
 
-              return isMultiline ? (
-                <Textarea
+              return (
+                <SmartColumnInput
                   key={columnName}
-                  label={renderLabel(columnName, isPrimaryKey, isFocused)}
+                  dataType={dataType}
+                  value={form.values[columnName] ?? ''}
+                  onChange={(val) => form.setFieldValue(columnName, val)}
+                  label={renderLabel(columnName, isPrimaryKey, isFocused, col?.dataType)}
                   placeholder="Enter value"
-                  minRows={3}
-                  maxRows={6}
-                  autosize
-                  {...form.getInputProps(columnName)}
                   disabled={isSaving || isPrimaryKey}
-                  ref={isFocused ? textareaRef : undefined}
-                  styles={inputStyles}
-                />
-              ) : (
-                <TextInput
-                  key={columnName}
-                  label={renderLabel(columnName, isPrimaryKey, isFocused)}
-                  placeholder="Enter value"
-                  {...form.getInputProps(columnName)}
-                  disabled={isSaving || isPrimaryKey}
-                  ref={isFocused ? inputRef : undefined}
-                  styles={inputStyles}
+                  forceMultiline={isMultiline}
+                  inputRef={isFocused ? (dataType ? undefined : (inputRef as React.Ref<HTMLInputElement>)) : undefined}
                 />
               );
             })}

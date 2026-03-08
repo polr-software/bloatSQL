@@ -125,6 +125,7 @@ export function ResultsCard({
         tableName: loadedTable,
         primaryKeyColumn: primaryKeyColumn?.name,
         primaryKeyValue: primaryKeyColumn ? rowData[primaryKeyColumn.name] : undefined,
+        columns: tableColumns,
       });
     },
     [tableColumns, selectCell, loadedTable]

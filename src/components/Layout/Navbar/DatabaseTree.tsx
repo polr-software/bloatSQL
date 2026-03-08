@@ -94,23 +94,23 @@ export function DatabaseTree({
         children: !hasData && !isLoading
           ? undefined
           : isLoading
-          ? [{
+            ? [{
               value: `loading-${table}`,
               label: 'Loading...',
               nodeType: 'column',
             } as ColumnNode]
-          : columns.length > 0
-          ? columns.map((column): ColumnNode => ({
-              value: `column-${table}-${column.name}`,
-              label: column.name,
-              nodeType: 'column',
-              column,
-            }))
-          : [{
-              value: `empty-${table}`,
-              label: 'No columns',
-              nodeType: 'column',
-            } as ColumnNode],
+            : columns.length > 0
+              ? columns.map((column): ColumnNode => ({
+                value: `column-${table}-${column.name}`,
+                label: column.name,
+                nodeType: 'column',
+                column,
+              }))
+              : [{
+                value: `empty-${table}`,
+                label: 'No columns',
+                nodeType: 'column',
+              } as ColumnNode],
       };
 
       return node;
@@ -151,6 +151,7 @@ export function DatabaseTree({
         return (
           <Group
             gap={5}
+            px={'xs'}
             {...elementProps}
             onClick={(e) => {
               elementProps.onClick(e);
@@ -235,7 +236,7 @@ export function DatabaseTree({
 
   return (
     <Stack gap={0}>
-      <Text size="xs" tt="uppercase" fw={700} c="dimmed" mb="xs" px="xs">
+      <Text size="xs" tt="uppercase" fw={700} c="dimmed" mb="xs">
         Tables ({filteredTables.length})
       </Text>
       <Tree

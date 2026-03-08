@@ -19,7 +19,6 @@ import {
   Badge,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { notifications } from '@mantine/notifications';
 import { useEffect, useState } from 'react';
 import { DataExportMode, ExportOptions } from '../../../types/database';
 import { useQueryStore } from '../../../stores/queryStore';
@@ -31,8 +30,7 @@ import {
   useClearExportError,
   useClearExportSuccess,
 } from '../../../stores/exportStore';
-import { open, save } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
+import { open } from '@tauri-apps/plugin-dialog';
 import { tauriCommands } from '../../../tauri/commands';
 import {
   IconAlertCircle,
@@ -41,26 +39,21 @@ import {
   IconCheck,
 } from '@tabler/icons-react';
 
-interface ExportFormProps {
+interface DatabaseExportFormProps {
   databaseName: string;
   onSuccess: () => void;
-  rowData?: Record<string, unknown> | Record<string, unknown>[];
 }
 
 interface FormValues {
   includeDrop: boolean;
   includeCreate: boolean;
-
   dataMode: DataExportMode;
-
   fileName: string;
   outputPath: string;
   exportFormat: 'sql';
-
   maxInsertSize: number;
   addLocks: boolean;
   disableForeignKeyChecks: boolean;
-
   selectedTables: string[];
 }
 
@@ -70,7 +63,19 @@ interface TableStats {
   estimatedSize: string;
 }
 
-export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps) {
+function estimateSizeFromRows(rows: number): string {
+  const bytes = rows * 500;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024)
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+export function DatabaseExportForm({
+  databaseName,
+  onSuccess,
+}: DatabaseExportFormProps) {
   const { tables } = useQueryStore();
   const exportDatabase = useExportDatabase();
   const isExporting = useIsExporting();
@@ -82,15 +87,6 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [tableStats, setTableStats] = useState<TableStats[]>([]);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
-  const [rowExportFormat, setRowExportFormat] = useState<'json' | 'csv' | 'sql'>('json');
-
-  const isRowExport = !!rowData;
-  const rowsArray: Record<string, unknown>[] = rowData
-    ? Array.isArray(rowData)
-      ? rowData
-      : [rowData]
-    : [];
-  const rowCount = rowsArray.length;
 
   const form = useForm<FormValues>({
     initialValues: {
@@ -106,12 +102,16 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
       selectedTables: [],
     },
     validate: {
-      outputPath: (value) => (!value ? 'Please select an output folder' : null),
-      selectedTables: (value) => (value.length === 0 ? 'Please select at least one table' : null),
-      maxInsertSize: (value) => (value < 1 || value > 10000 ? 'Must be between 1 and 10,000' : null),
+      outputPath: (value) =>
+        !value ? 'Please select an output folder' : null,
+      selectedTables: (value) =>
+        value.length === 0 ? 'Please select at least one table' : null,
+      maxInsertSize: (value) =>
+        value < 1 || value > 10000 ? 'Must be between 1 and 10,000' : null,
       fileName: (value) => {
         if (!value) return 'File name is required';
-        if (!/^[^<>:"/\\|?*]+$/.test(value)) return 'Invalid file name characters';
+        if (!/^[^<>:"/\\|?*]+$/.test(value))
+          return 'Invalid file name characters';
         return null;
       },
     },
@@ -124,7 +124,10 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
   }, [tables]);
 
   useEffect(() => {
-    form.setFieldValue('fileName', `${databaseName}_export_${new Date().getTime()}.sql`);
+    form.setFieldValue(
+      'fileName',
+      `${databaseName}_export_${new Date().getTime()}.sql`
+    );
     clearExportSuccess();
     clearExportError();
   }, [databaseName, clearExportSuccess, clearExportError]);
@@ -141,10 +144,10 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
           const result = await tauriCommands.executeQuery(
             `SELECT COUNT(*) as count FROM \`${table}\``
           );
-          const rowCount = result.rows[0]?.count as number || 0;
+          const rowCount = (result.rows[0]?.count as number) || 0;
           const estimatedSize = estimateSizeFromRows(rowCount);
           stats.push({ name: table, rowCount, estimatedSize });
-        } catch (err) {
+        } catch {
           stats.push({ name: table, rowCount: 0, estimatedSize: 'Unknown' });
         }
       }
@@ -156,25 +159,15 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
     }
   };
 
-  const estimateSizeFromRows = (rows: number): string => {
-    const bytes = rows * 500;
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  };
-
   const getTotalStats = () => {
     const selectedStats = tableStats.filter((t) =>
       form.values.selectedTables.includes(t.name)
     );
     const totalRows = selectedStats.reduce((sum, t) => sum + t.rowCount, 0);
-    const totalBytes = totalRows * 500;
     return {
       totalRows,
       totalTables: selectedStats.length,
       estimatedSize: estimateSizeFromRows(totalRows),
-      totalBytes,
     };
   };
 
@@ -215,85 +208,7 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
     }
   };
 
-  const handleRowExport = async () => {
-    if (!rowData || rowsArray.length === 0) return;
-
-    let content = '';
-    let defaultFilename = '';
-    let filters: Array<{ name: string; extensions: string[] }> = [];
-    const ts = new Date().getTime();
-
-    if (rowExportFormat === 'json') {
-      content = JSON.stringify(rowCount === 1 ? rowsArray[0] : rowsArray, null, 2);
-      defaultFilename = `row_export_${ts}.json`;
-      filters = [{ name: 'JSON', extensions: ['json'] }];
-    } else if (rowExportFormat === 'csv') {
-      const headers = Object.keys(rowsArray[0]).join(',');
-      const valueLines = rowsArray.map((row) =>
-        Object.values(row).map((v) => {
-          if (v === null) return 'NULL';
-          if (typeof v === 'string') return `"${v.replace(/"/g, '""')}"`;
-          return String(v);
-        }).join(',')
-      );
-      content = [headers, ...valueLines].join('\n');
-      defaultFilename = `row_export_${ts}.csv`;
-      filters = [{ name: 'CSV', extensions: ['csv'] }];
-    } else if (rowExportFormat === 'sql') {
-      const stmts = rowsArray.map((row) => {
-        const columns = Object.keys(row).map((k) => `\`${k}\``).join(', ');
-        const values = Object.values(row).map((v) => {
-          if (v === null) return 'NULL';
-          if (typeof v === 'string') return `'${v.replace(/'/g, "''")}'`;
-          return String(v);
-        }).join(', ');
-        return `INSERT INTO table_name (${columns}) VALUES (${values});`;
-      });
-      content = stmts.join('\n');
-      defaultFilename = `row_export_${ts}.sql`;
-      filters = [{ name: 'SQL', extensions: ['sql'] }];
-    }
-
-    try {
-      const filePath = await save({
-        defaultPath: defaultFilename,
-        filters: filters,
-        title: 'Save Row Export',
-      });
-
-      if (!filePath) {
-        return;
-      }
-
-      await invoke('write_text_file', { path: filePath, content });
-
-      clearExportSuccess();
-      clearExportError();
-
-      notifications.show({
-        title: 'Success',
-        message: `Row exported successfully to ${filePath}`,
-        color: 'green',
-      });
-
-      setTimeout(() => {
-        onSuccess();
-      }, 2000);
-    } catch (error) {
-      notifications.show({
-        title: 'Export Failed',
-        message: String(error),
-        color: 'red',
-      });
-    }
-  };
-
   const handleExport = async () => {
-    if (isRowExport) {
-      handleRowExport();
-      return;
-    }
-
     const validation = form.validate();
     if (validation.hasErrors) return;
 
@@ -310,131 +225,43 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
     await exportDatabase(options);
 
     if (!exportError) {
-      setTimeout(() => {
-        onSuccess();
-      }, 3000);
+      setTimeout(() => onSuccess(), 3000);
     }
   };
 
   const stats = getTotalStats();
   const hasLargeDataset = stats.totalRows > 100000;
 
-  if (isRowExport) {
-    const getPreviewContent = () => {
-      if (rowsArray.length === 0) return '';
-      const previewRows = rowsArray.slice(0, 10);
-      const truncated = rowsArray.length > 10;
-
-      if (rowExportFormat === 'json') {
-        const data = previewRows.length === 1 ? previewRows[0] : previewRows;
-        return JSON.stringify(data, null, 2) + (truncated ? `\n// ... ${rowsArray.length - 10} more rows` : '');
-      } else if (rowExportFormat === 'csv') {
-        const headers = Object.keys(rowsArray[0]).join(',');
-        const valueLines = previewRows.map((row) =>
-          Object.values(row).map((v) => {
-            if (v === null) return 'NULL';
-            if (typeof v === 'string') return `"${v.replace(/"/g, '""')}"`;
-            return String(v);
-          }).join(',')
-        );
-        return [headers, ...valueLines].join('\n') + (truncated ? `\n...` : '');
-      } else if (rowExportFormat === 'sql') {
-        const stmts = previewRows.map((row) => {
-          const columns = Object.keys(row).map((k) => `\`${k}\``).join(', ');
-          const values = Object.values(row).map((v) => {
-            if (v === null) return 'NULL';
-            if (typeof v === 'string') return `'${v.replace(/'/g, "''")}'`;
-            return String(v);
-          }).join(', ');
-          return `INSERT INTO table_name (${columns}) VALUES (${values});`;
-        });
-        return stmts.join('\n') + (truncated ? `\n-- ... ${rowsArray.length - 10} more rows` : '');
-      }
-
-      return '';
-    };
-
-    return (
-      <form onSubmit={(e) => { e.preventDefault(); handleExport(); }}>
-        <Stack gap="md">
-          <Card withBorder p="md">
-            <Stack gap="md">
-              <div>
-                <Text size="sm" fw={500}>Export Format</Text>
-                <Text size="xs" c="dimmed">Choose the format for exporting this row</Text>
-              </div>
-              <Divider />
-              <Radio.Group value={rowExportFormat} onChange={(value) => setRowExportFormat(value as 'json' | 'csv' | 'sql')}>
-                <Stack gap="xs">
-                  <Radio
-                    value="json"
-                    label="JSON"
-                    description="Export as JSON object"
-                  />
-                  <Radio
-                    value="csv"
-                    label="CSV"
-                    description="Export as CSV row"
-                  />
-                  <Radio
-                    value="sql"
-                    label="SQL INSERT"
-                    description="Export as SQL INSERT statement"
-                  />
-                </Stack>
-              </Radio.Group>
-            </Stack>
-          </Card>
-
-          <Card withBorder p="md">
-            <Stack gap="xs">
-              <Text size="sm" fw={500}>Preview</Text>
-              <Divider />
-              <ScrollArea h={200}>
-                <Text size="xs" style={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                  {getPreviewContent()}
-                </Text>
-              </ScrollArea>
-            </Stack>
-          </Card>
-
-          <Alert color="blue" title="Export Location">
-            <Text size="sm">
-              When you click Export Row, a save dialog will open where you can choose the file name and location.
-            </Text>
-          </Alert>
-
-          <Group justify="flex-end" mt="md">
-            <Button variant="light" onClick={onSuccess}>
-              Cancel
-            </Button>
-            <Button type="submit">
-              Export {rowCount === 1 ? 'Row' : `${rowCount} Rows`}
-            </Button>
-          </Group>
-        </Stack>
-      </form>
-    );
-  }
-
   return (
-    <form onSubmit={(e) => { e.preventDefault(); handleExport(); }}>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleExport();
+      }}
+    >
       <Stack gap="md" pos="relative">
         <LoadingOverlay
           visible={isExporting}
           overlayProps={{ radius: 'sm', blur: 2 }}
-          loaderProps={{ children: (
-            <Stack align="center" gap="md">
-              <Loader size="lg" />
-              <Text size="sm" c="dimmed">
-                Exporting database... This may take a while for large datasets.
-              </Text>
-            </Stack>
-          )}}
+          loaderProps={{
+            children: (
+              <Stack align="center" gap="md">
+                <Loader size="lg" />
+                <Text size="sm" c="dimmed">
+                  Exporting database... This may take a while for large
+                  datasets.
+                </Text>
+              </Stack>
+            ),
+          }}
         />
 
         {exportSuccess && (
-          <Alert icon={<IconCheck size={16} />} color="green" onClose={clearExportSuccess}>
+          <Alert
+            icon={<IconCheck size={16} />}
+            color="green"
+            onClose={clearExportSuccess}
+          >
             <Text size="sm">{exportSuccess}</Text>
           </Alert>
         )}
@@ -455,12 +282,14 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
             <Stack gap="xs">
               <Text fw={500}>Large Dataset Warning</Text>
               <Text size="sm">
-                You're exporting {stats.totalRows.toLocaleString()} rows (~{stats.estimatedSize}).
-                This may consume significant memory and take several minutes.
+                You're exporting {stats.totalRows.toLocaleString()} rows (~
+                {stats.estimatedSize}). This may consume significant memory and
+                take several minutes.
               </Text>
               <Text size="sm" c="dimmed">
-                Note: The current implementation loads the entire export into memory before writing.
-                Consider exporting fewer tables or implementing row limits if you encounter issues.
+                Note: The current implementation loads the entire export into
+                memory before writing. Consider exporting fewer tables or
+                implementing row limits if you encounter issues.
               </Text>
             </Stack>
           </Alert>
@@ -468,8 +297,12 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
 
         <Card withBorder p="md">
           <Stack gap="xs">
-            <Text size="sm" fw={500}>Structure Options</Text>
-            <Text size="xs" c="dimmed">Configure how table structures are exported</Text>
+            <Text size="sm" fw={500}>
+              Structure Options
+            </Text>
+            <Text size="xs" c="dimmed">
+              Configure how table structures are exported
+            </Text>
             <Divider />
             <Checkbox
               label="DROP TABLE statements"
@@ -486,8 +319,12 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
 
         <Card withBorder p="md">
           <Stack gap="xs">
-            <Text size="sm" fw={500}>Data Options</Text>
-            <Text size="xs" c="dimmed">Choose how to export table data</Text>
+            <Text size="sm" fw={500}>
+              Data Options
+            </Text>
+            <Text size="xs" c="dimmed">
+              Choose how to export table data
+            </Text>
             <Divider />
             <Radio.Group {...form.getInputProps('dataMode')}>
               <Stack gap="xs">
@@ -519,8 +356,12 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
         <Card withBorder p="md">
           <Stack gap="md">
             <div>
-              <Text size="sm" fw={500}>Output Options</Text>
-              <Text size="xs" c="dimmed">Configure export file and location</Text>
+              <Text size="sm" fw={500}>
+                Output Options
+              </Text>
+              <Text size="xs" c="dimmed">
+                Configure export file and location
+              </Text>
             </div>
             <Divider />
 
@@ -578,13 +419,19 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
                 style={{ cursor: 'pointer' }}
                 onClick={() => setShowAdvanced(!showAdvanced)}
               >
-                <Text size="sm" fw={500}>Advanced SQL Options</Text>
+                <Text size="sm" fw={500}>
+                  Advanced SQL Options
+                </Text>
                 <ActionIcon variant="subtle" size="sm">
-                  {showAdvanced ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
+                  {showAdvanced ? (
+                    <IconChevronUp size={16} />
+                  ) : (
+                    <IconChevronDown size={16} />
+                  )}
                 </ActionIcon>
               </Group>
 
-              <Collapse in={showAdvanced}>
+              <Collapse expanded={showAdvanced}>
                 <Stack gap="xs" mt="xs">
                   <Checkbox
                     label="Add table locks"
@@ -594,10 +441,13 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
                   <Checkbox
                     label="Disable foreign key checks"
                     description="Add SET FOREIGN_KEY_CHECKS=0/1 around the export"
-                    {...form.getInputProps('disableForeignKeyChecks', { type: 'checkbox' })}
+                    {...form.getInputProps('disableForeignKeyChecks', {
+                      type: 'checkbox',
+                    })}
                   />
                   <Text size="xs" c="dimmed">
-                    Note: These options are prepared for future backend implementation.
+                    Note: These options are prepared for future backend
+                    implementation.
                   </Text>
                 </Stack>
               </Collapse>
@@ -609,16 +459,26 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
           <Stack gap="md">
             <Group justify="space-between">
               <div>
-                <Text size="sm" fw={500}>Select Tables</Text>
+                <Text size="sm" fw={500}>
+                  Select Tables
+                </Text>
                 <Text size="xs" c="dimmed">
                   Choose which tables to include in the export
                 </Text>
               </div>
               <Group gap="xs">
-                <Button size="xs" variant="light" onClick={handleSelectAllTables}>
+                <Button
+                  size="xs"
+                  variant="light"
+                  onClick={handleSelectAllTables}
+                >
                   Select All
                 </Button>
-                <Button size="xs" variant="light" onClick={handleDeselectAllTables}>
+                <Button
+                  size="xs"
+                  variant="light"
+                  onClick={handleDeselectAllTables}
+                >
                   Deselect All
                 </Button>
                 <Button
@@ -646,7 +506,11 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
                   tables.map((table) => {
                     const stat = tableStats.find((s) => s.name === table);
                     return (
-                      <Group key={table} justify="space-between" wrap="nowrap">
+                      <Group
+                        key={table}
+                        justify="space-between"
+                        wrap="nowrap"
+                      >
                         <Checkbox
                           label={table}
                           checked={form.values.selectedTables.includes(table)}
@@ -673,30 +537,45 @@ export function ExportForm({ databaseName, onSuccess, rowData }: ExportFormProps
               </Stack>
             </ScrollArea>
 
-            {tableStats.length > 0 && form.values.selectedTables.length > 0 && (
-              <>
-                <Divider />
-                <Card bg="gray.0" p="sm">
-                  <Group justify="space-between">
-                    <Text size="sm" fw={500}>Export Summary</Text>
-                    <Group gap="md">
-                      <div>
-                        <Text size="xs" c="dimmed">Tables</Text>
-                        <Text size="sm" fw={500}>{stats.totalTables}</Text>
-                      </div>
-                      <div>
-                        <Text size="xs" c="dimmed">Total Rows</Text>
-                        <Text size="sm" fw={500}>{stats.totalRows.toLocaleString()}</Text>
-                      </div>
-                      <div>
-                        <Text size="xs" c="dimmed">Est. Size</Text>
-                        <Text size="sm" fw={500}>{stats.estimatedSize}</Text>
-                      </div>
+            {tableStats.length > 0 &&
+              form.values.selectedTables.length > 0 && (
+                <>
+                  <Divider />
+                  <Card bg="gray.0" p="sm">
+                    <Group justify="space-between">
+                      <Text size="sm" fw={500}>
+                        Export Summary
+                      </Text>
+                      <Group gap="md">
+                        <div>
+                          <Text size="xs" c="dimmed">
+                            Tables
+                          </Text>
+                          <Text size="sm" fw={500}>
+                            {stats.totalTables}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text size="xs" c="dimmed">
+                            Total Rows
+                          </Text>
+                          <Text size="sm" fw={500}>
+                            {stats.totalRows.toLocaleString()}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text size="xs" c="dimmed">
+                            Est. Size
+                          </Text>
+                          <Text size="sm" fw={500}>
+                            {stats.estimatedSize}
+                          </Text>
+                        </div>
+                      </Group>
                     </Group>
-                  </Group>
-                </Card>
-              </>
-            )}
+                  </Card>
+                </>
+              )}
           </Stack>
         </Card>
 

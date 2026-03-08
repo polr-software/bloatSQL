@@ -71,6 +71,21 @@ impl QueryError {
         self.hint = Some(hint.into());
         self
     }
+
+    /// Creates a QUERY_ERROR from any display-able error.
+    pub fn for_query(e: impl std::fmt::Display) -> Self {
+        Self::with_code(e.to_string(), error_codes::QUERY_ERROR)
+    }
+
+    /// Creates a CONNECTION_ERROR from any display-able error.
+    pub fn for_connection(e: impl std::fmt::Display) -> Self {
+        Self::with_code(e.to_string(), error_codes::CONNECTION_ERROR)
+    }
+
+    /// Creates a TIMEOUT_ERROR.
+    pub fn timed_out() -> Self {
+        Self::with_code("Query timed out", error_codes::TIMEOUT_ERROR)
+    }
 }
 
 /// Error codes for consistent error handling across drivers.

@@ -3,7 +3,6 @@ import {
   AppShell,
   Stack,
   Text,
-  TextInput,
   Button,
   Group,
   Badge,
@@ -11,6 +10,7 @@ import {
   Title,
   ScrollArea,
 } from '@mantine/core';
+import { SmartColumnInput } from './SmartColumnInput';
 import { useForm } from '@mantine/form';
 import { IconPlus, IconX, IconAlertCircle, IconCheck } from '@tabler/icons-react';
 import {
@@ -50,12 +50,6 @@ function buildValidate(columns: TableColumn[]) {
   };
 }
 
-const inputStyles = {
-  input: {
-    fontFamily: 'monospace',
-    fontSize: 'var(--mantine-font-size-sm)',
-  },
-};
 
 export function AddRowForm() {
   const tableName = useAddRowTableName();
@@ -163,14 +157,16 @@ export function AddRowForm() {
               );
 
               return (
-                <TextInput
+                <SmartColumnInput
                   key={col.name}
+                  dataType={col.dataType}
+                  value={form.values[col.name] ?? ''}
+                  onChange={(val) => form.setFieldValue(col.name, val)}
                   label={label}
                   placeholder={placeholder}
                   withAsterisk={required}
-                  {...form.getInputProps(col.name)}
+                  error={form.errors[col.name]}
                   disabled={isSaving}
-                  styles={inputStyles}
                 />
               );
             })}
