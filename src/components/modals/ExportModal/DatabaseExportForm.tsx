@@ -21,7 +21,7 @@ import {
 import { useForm } from '@mantine/form';
 import { useEffect, useState } from 'react';
 import { DataExportMode, ExportOptions } from '../../../types/database';
-import { useQueryStore } from '../../../stores/queryStore';
+import { useTables } from '../../../stores/databaseBrowserStore';
 import {
   useExportDatabase,
   useIsExporting,
@@ -76,7 +76,7 @@ export function DatabaseExportForm({
   databaseName,
   onSuccess,
 }: DatabaseExportFormProps) {
-  const { tables } = useQueryStore();
+  const tables = useTables();
   const exportDatabase = useExportDatabase();
   const isExporting = useIsExporting();
   const exportError = useExportError();

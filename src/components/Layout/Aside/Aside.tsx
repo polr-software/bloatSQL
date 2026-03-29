@@ -6,12 +6,6 @@ import { useEditingColumnDraft, useIsAddingNewColumn, useIsEditingStructure } fr
 import { CellEditForm, AddRowForm } from '../../CellEditor';
 import { ColumnEditForm, StructureEditControls } from '../../StructureEditor';
 
-export interface HistoryItem {
-  query: string;
-  timestamp: Date;
-  executionTime: number;
-}
-
 function EmptyState() {
   return (
 <AppShell.Section grow>

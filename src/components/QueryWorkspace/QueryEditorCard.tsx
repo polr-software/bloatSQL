@@ -4,7 +4,10 @@ import { IconDatabase } from '@tabler/icons-react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { MonacoSqlEditor, MonacoSqlEditorRef } from './MonacoSqlEditor';
 import { SplitButton, SplitButtonMenuItem } from '../common';
-import { useInjectBenchmarkData, useExecuteQueryText } from '../../stores/queryStore';
+import {
+  useInjectBenchmarkData,
+  useExecuteQueryText,
+} from '../../stores/queryExecutionStore';
 
 function EditorErrorFallback({ resetErrorBoundary }: { resetErrorBoundary: () => void }) {
   return (

@@ -3,8 +3,8 @@ mod queries;
 pub(super) mod types;
 
 use crate::db::connection::{
-    error_codes, DatabaseConnection, DbResult, QueryError, QueryResult, TableColumn,
-    TableRelationship,
+    error_codes, AddRowValue, DatabaseConnection, DbResult, QueryError, QueryResult,
+    SchemaMutationResult, SchemaOperation, TableColumn, TableRelationship,
 };
 use async_trait::async_trait;
 use mysql_async::{prelude::*, Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts};
@@ -189,6 +189,28 @@ impl DatabaseConnection for MariaDbConnection {
             primary_key_value,
         )
         .await
+    }
+
+    async fn delete_rows(
+        &self,
+        table_name: &str,
+        primary_key_column: &str,
+        primary_key_values: &[String],
+    ) -> DbResult<u64> {
+        self.impl_delete_rows(table_name, primary_key_column, primary_key_values)
+            .await
+    }
+
+    async fn add_row(&self, table_name: &str, values: &[AddRowValue]) -> DbResult<String> {
+        self.impl_add_row(table_name, values).await
+    }
+
+    async fn apply_schema_operations(
+        &self,
+        table_name: &str,
+        operations: &[SchemaOperation],
+    ) -> DbResult<SchemaMutationResult> {
+        self.impl_apply_schema_operations(table_name, operations).await
     }
 
     async fn export_database_with_options(

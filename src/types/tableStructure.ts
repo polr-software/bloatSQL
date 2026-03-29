@@ -31,3 +31,26 @@ export interface AlterColumnOperation {
   newColumnName?: string;
   newDefinition?: ColumnDefinition;
 }
+
+export interface ApplySchemaOperationsRequest {
+  tableName: string;
+  operations: AlterColumnOperation[];
+}
+
+export interface ApplySchemaOperationsFailure {
+  failedOperationIndex: number;
+  failedOperationType: AlterOperationType;
+  message: string;
+  code?: string;
+  detail?: string;
+  hint?: string;
+  failedStatement?: string;
+}
+
+export interface ApplySchemaOperationsResult {
+  success: boolean;
+  totalOperations: number;
+  executedOperations: number;
+  rolledBack: boolean;
+  failure?: ApplySchemaOperationsFailure;
+}

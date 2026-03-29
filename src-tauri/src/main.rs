@@ -53,7 +53,10 @@ fn main() {
             commands::get_table_relationships,
             commands::disconnect_from_database,
             commands::export_database,
+            commands::add_row,
             commands::update_cell,
+            commands::delete_rows,
+            commands::apply_schema_operations,
             commands::write_text_file,
             commands::ping_connection,
         ])

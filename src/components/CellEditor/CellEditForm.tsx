@@ -22,21 +22,15 @@ import {
   useSetEditCellError,
 } from '../../stores/editCellStore';
 import { tauriCommands } from '../../tauri/commands';
-import { useQueryStore } from '../../stores/queryStore';
+import { useQueryExecutionStore } from '../../stores/queryExecutionStore';
 import { useConsoleLogStore } from '../../stores/consoleLogStore';
-
-function formatValue(value: unknown): string {
-  if (value === null) return '';
-  if (value === undefined) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return JSON.stringify(value);
-}
-
-function isMultilineValue(value: unknown): boolean {
-  if (typeof value !== 'string') return false;
-  return value.length > 100 || value.includes('\n');
-}
+import {
+  buildCellEditInitialValues,
+  buildChangedCellRequests,
+  getCellEditValidationError,
+  isMultilineCellValue,
+  submitChangedCellRequests,
+} from './cellEditForm.logic';
 
 export function CellEditForm() {
   const selectedCell = useSelectedCell();
@@ -48,24 +42,14 @@ export function CellEditForm() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [showSaved, setShowSaved] = useState(false);
 
-  const initialFormValues = selectedCell
-    ? Object.entries(selectedCell.rowData).reduce((acc, [key, value]) => {
-        acc[key] = formatValue(value);
-        return acc;
-      }, {} as Record<string, string>)
-    : {};
-
   const form = useForm({
     mode: 'controlled',
-    initialValues: initialFormValues,
+    initialValues: buildCellEditInitialValues(selectedCell),
   });
 
   useEffect(() => {
     if (selectedCell) {
-      const initialValues: Record<string, string> = {};
-      Object.entries(selectedCell.rowData).forEach(([key, value]) => {
-        initialValues[key] = formatValue(value);
-      });
+      const initialValues = buildCellEditInitialValues(selectedCell);
       form.setInitialValues(initialValues);
       form.reset();
       setShowSaved(false);
@@ -78,24 +62,20 @@ export function CellEditForm() {
   }, [selectedCell]);
 
   const handleSubmit = async (values: Record<string, string>) => {
-    if (!selectedCell || !selectedCell.tableName) {
-      setError('Cannot update: table name not available');
+    const validationError = getCellEditValidationError(selectedCell);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
-    if (!selectedCell.primaryKeyColumn || selectedCell.primaryKeyValue === undefined) {
-      setError('Cannot update: primary key not found. Updates require a primary key.');
+    const currentCell = selectedCell;
+    if (!currentCell) {
       return;
     }
 
-    const validColumns = Object.keys(selectedCell.rowData);
-    const changedColumns = Object.entries(values).filter(([key, value]) => {
-      if (!validColumns.includes(key)) return false;
-      const originalValue = formatValue(selectedCell.rowData[key]);
-      return value !== originalValue;
-    });
+    const changedRequests = buildChangedCellRequests(currentCell, values);
 
-    if (changedColumns.length === 0) {
+    if (changedRequests.length === 0) {
       return;
     }
 
@@ -103,35 +83,19 @@ export function CellEditForm() {
     setError(null);
 
     try {
-      for (const [columnName, newValue] of changedColumns) {
-        const updateRequest = {
-          tableName: selectedCell.tableName,
-          columnName,
-          newValue: newValue === '' ? null : newValue,
-          primaryKeyColumn: selectedCell.primaryKeyColumn,
-          primaryKeyValue: String(selectedCell.primaryKeyValue),
-        };
-
-        console.log('Updating cell:', updateRequest);
-
-        const result = await tauriCommands.updateCell(updateRequest);
-
-        if (result.executedQuery) {
-          useConsoleLogStore.getState().addLog(result.executedQuery);
-        }
-      }
-
-      await useQueryStore.getState().refreshTable();
+      await submitChangedCellRequests({
+        requests: changedRequests,
+        updateCell: tauriCommands.updateCell,
+        refreshTable: useQueryExecutionStore.getState().refreshTable,
+        addConsoleLog: useConsoleLogStore.getState().addLog,
+      });
 
       form.resetDirty(values);
 
       setShowSaved(true);
       setTimeout(() => setShowSaved(false), 2000);
     } catch (err) {
-      console.error('Failed to update cell:', err);
-      const errorMsg = err instanceof Error ? err.message : JSON.stringify(err);
-      const detailedError = `Failed to update cell: ${errorMsg}`;
-      setError(detailedError);
+      setError(err instanceof Error ? err.message : JSON.stringify(err));
     } finally {
       setSaving(false);
     }
@@ -201,7 +165,7 @@ export function CellEditForm() {
               const isPrimaryKey = columnName === selectedCell.primaryKeyColumn;
               const col = columnMeta.find((c) => c.name === columnName);
               const dataType = col?.dataType ?? '';
-              const isMultiline = !dataType && isMultilineValue(rawValue);
+              const isMultiline = !dataType && isMultilineCellValue(rawValue);
 
               return (
                 <SmartColumnInput

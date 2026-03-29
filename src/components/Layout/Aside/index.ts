@@ -1,1 +1,1 @@
-export { Aside, type HistoryItem } from './Aside';
+export { Aside } from './Aside';

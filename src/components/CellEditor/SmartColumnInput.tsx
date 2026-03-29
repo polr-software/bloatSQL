@@ -51,6 +51,7 @@ interface SmartColumnInputProps {
   onChange: (value: string) => void;
   label: ReactNode;
   placeholder?: string;
+  description?: ReactNode;
   disabled?: boolean;
   withAsterisk?: boolean;
   error?: ReactNode;
@@ -65,6 +66,7 @@ export function SmartColumnInput({
   onChange,
   label,
   placeholder,
+  description,
   disabled,
   withAsterisk,
   error,
@@ -78,6 +80,7 @@ export function SmartColumnInput({
       <DateTimePicker
         label={label}
         placeholder={placeholder}
+        description={description}
         value={value || null}
         onChange={(val) => onChange(val ?? '')}
         withSeconds
@@ -96,6 +99,7 @@ export function SmartColumnInput({
       <DatePickerInput
         label={label}
         placeholder="Pick date"
+        description={description}
         value={value || null}
         onChange={(val) => onChange(val ?? '')}
         clearable
@@ -113,6 +117,7 @@ export function SmartColumnInput({
       <Textarea
         label={label}
         placeholder={placeholder}
+        description={description}
         value={value}
         onChange={(e) => onChange(e.currentTarget.value)}
         minRows={3}
@@ -131,6 +136,7 @@ export function SmartColumnInput({
     <TextInput
       label={label}
       placeholder={placeholder}
+      description={description}
       value={value}
       onChange={(e) => onChange(e.currentTarget.value)}
       disabled={disabled}

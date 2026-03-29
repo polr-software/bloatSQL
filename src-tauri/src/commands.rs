@@ -1,4 +1,6 @@
-use crate::db::connection::QueryError;
+use crate::db::connection::{
+    AddRowValue, QueryError, SchemaMutationResult, SchemaOperation, SchemaOperationType,
+};
 use crate::db::{create_connection, DatabaseConnection, QueryResult, TableColumn, TableRelationship};
 use crate::storage::{ConnectionsStore, StoredConnection};
 use serde::{Deserialize, Serialize};
@@ -32,12 +34,31 @@ pub struct ExportOptions {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddRowRequest {
+    pub table_name: String,
+    pub values: Vec<AddRowValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateCellRequest {
     pub table_name: String,
     pub column_name: String,
     pub new_value: Option<String>,
     pub primary_key_column: String,
     pub primary_key_value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteRowsRequest {
+    pub table_name: String,
+    pub primary_key_column: String,
+    pub primary_key_values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplySchemaOperationsRequest {
+    pub table_name: String,
+    pub operations: Vec<SchemaOperation>,
 }
 
 pub type ActiveConnection = Arc<Mutex<Option<Arc<dyn DatabaseConnection>>>>;
@@ -271,6 +292,29 @@ pub async fn export_database(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddRowResult {
+    pub success: bool,
+    pub inserted_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<AddRowError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executed_query: Option<String>,
+}
+
+/// Detailed error information for add-row failures.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddRowError {
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    pub table: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateCellResult {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -297,6 +341,88 @@ pub struct UpdateCellError {
     pub table: String,
     /// The column being updated.
     pub column: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteRowsResult {
+    pub success: bool,
+    pub deleted_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<DeleteRowsError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executed_query: Option<String>,
+}
+
+/// Detailed error information for row deletion failures.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteRowsError {
+    /// Human-readable error message.
+    pub message: String,
+    /// Database error code (e.g., PostgreSQL SQLSTATE).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// Additional detail from database.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Hint on how to fix the issue.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    /// The table being updated.
+    pub table: String,
+    /// The primary key column used for deletion.
+    pub primary_key_column: String,
+}
+
+#[tauri::command]
+pub async fn add_row(
+    request: AddRowRequest,
+    active_conn: tauri::State<'_, ActiveConnection>,
+) -> Result<AddRowResult, String> {
+    debug!(
+        "add_row called: table={}, values={}",
+        request.table_name,
+        request.values.len()
+    );
+
+    let conn = {
+        let active = active_conn.lock().await;
+        active.as_ref().map(Arc::clone)
+    };
+
+    match conn {
+        Some(conn) => match conn.add_row(&request.table_name, &request.values).await {
+            Ok(executed_query) => Ok(AddRowResult {
+                success: true,
+                inserted_count: 1,
+                error: None,
+                executed_query: Some(executed_query),
+            }),
+            Err(error) => Ok(AddRowResult {
+                success: false,
+                inserted_count: 0,
+                error: Some(AddRowError {
+                    message: error.message,
+                    code: error.code,
+                    detail: error.detail,
+                    hint: error.hint,
+                    table: request.table_name,
+                }),
+                executed_query: None,
+            }),
+        },
+        None => Ok(AddRowResult {
+            success: false,
+            inserted_count: 0,
+            error: Some(AddRowError {
+                message: "No active database connection".to_string(),
+                code: Some("NO_CONNECTION".to_string()),
+                detail: None,
+                hint: Some("Please connect to a database first".to_string()),
+                table: request.table_name,
+            }),
+            executed_query: None,
+        }),
+    }
 }
 
 /// Updates a single cell value in a table.
@@ -394,6 +520,134 @@ pub async fn update_cell(
 }
 
 #[tauri::command]
+pub async fn delete_rows(
+    request: DeleteRowsRequest,
+    active_conn: tauri::State<'_, ActiveConnection>,
+) -> Result<DeleteRowsResult, String> {
+    debug!(
+        "delete_rows called: table={}, pk_column={}, values={}",
+        request.table_name,
+        request.primary_key_column,
+        request.primary_key_values.len()
+    );
+
+    let conn = {
+        let active = active_conn.lock().await;
+        active.as_ref().map(Arc::clone)
+    };
+
+    match conn {
+        Some(conn) => {
+            match conn
+                .delete_rows(
+                    &request.table_name,
+                    &request.primary_key_column,
+                    &request.primary_key_values,
+                )
+                .await
+            {
+                Ok(deleted_count) => Ok(DeleteRowsResult {
+                    success: true,
+                    deleted_count,
+                    error: None,
+                    executed_query: Some(build_delete_rows_preview_query(&request)),
+                }),
+                Err(error) => Ok(DeleteRowsResult {
+                    success: false,
+                    deleted_count: 0,
+                    error: Some(DeleteRowsError {
+                        message: error.message,
+                        code: error.code,
+                        detail: error.detail,
+                        hint: error.hint,
+                        table: request.table_name,
+                        primary_key_column: request.primary_key_column,
+                    }),
+                    executed_query: None,
+                }),
+            }
+        }
+        None => Ok(DeleteRowsResult {
+            success: false,
+            deleted_count: 0,
+            error: Some(DeleteRowsError {
+                message: "No active database connection".to_string(),
+                code: Some("NO_CONNECTION".to_string()),
+                detail: None,
+                hint: Some("Please connect to a database first".to_string()),
+                table: request.table_name,
+                primary_key_column: request.primary_key_column,
+            }),
+            executed_query: None,
+        }),
+    }
+}
+
+#[tauri::command]
+pub async fn apply_schema_operations(
+    request: ApplySchemaOperationsRequest,
+    active_conn: tauri::State<'_, ActiveConnection>,
+) -> Result<SchemaMutationResult, String> {
+    debug!(
+        "apply_schema_operations called: table={}, operations={}",
+        request.table_name,
+        request.operations.len()
+    );
+
+    let conn = {
+        let active = active_conn.lock().await;
+        active.as_ref().map(Arc::clone)
+    };
+
+    match conn {
+        Some(conn) => match conn
+            .apply_schema_operations(&request.table_name, &request.operations)
+            .await
+        {
+            Ok(result) => Ok(result),
+            Err(error) => Ok(SchemaMutationResult {
+                success: false,
+                total_operations: request.operations.len(),
+                executed_operations: 0,
+                rolled_back: false,
+                failure: Some(crate::db::connection::SchemaMutationFailure {
+                    failed_operation_index: 0,
+                    failed_operation_type: request
+                        .operations
+                        .first()
+                        .map(|op| op.operation_type.clone())
+                        .unwrap_or(SchemaOperationType::AddColumn),
+                    message: error.message,
+                    code: error.code,
+                    detail: error.detail,
+                    hint: error.hint,
+                    failed_statement: None,
+                }),
+            }),
+        },
+        None => Ok(SchemaMutationResult {
+            success: false,
+            total_operations: request.operations.len(),
+            executed_operations: 0,
+            rolled_back: false,
+            failure: Some(crate::db::connection::SchemaMutationFailure {
+                failed_operation_index: 0,
+                failed_operation_type: request
+                    .operations
+                    .first()
+                    .map(|op| op.operation_type.clone())
+                    .unwrap_or(SchemaOperationType::AddColumn),
+                message: "No active database connection".to_string(),
+                code: Some("NO_CONNECTION".to_string()),
+                detail: None,
+                hint: Some("Please connect to a database first".to_string()),
+                failed_statement: None,
+            }),
+        }),
+    }
+}
+
+#[tauri::command]
 pub async fn ping_connection(
     active_conn: tauri::State<'_, ActiveConnection>,
 ) -> Result<u64, String> {
@@ -412,4 +666,18 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
 
     debug!("Wrote text file: {}", path);
     Ok(())
+}
+
+fn build_delete_rows_preview_query(request: &DeleteRowsRequest) -> String {
+    let values_preview = request
+        .primary_key_values
+        .iter()
+        .map(|value| format!("'{}'", value.replace('\'', "''")))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!(
+        "DELETE FROM {} WHERE {} IN ({})",
+        request.table_name, request.primary_key_column, values_preview
+    )
 }

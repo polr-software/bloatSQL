@@ -4,12 +4,19 @@ use super::types::{
 };
 use super::MariaDbConnection;
 use crate::db::connection::{
-    error_codes, DbResult, QueryError, QueryResult, TableColumn, TableRelationship,
-    DEFAULT_QUERY_TIMEOUT, MAX_QUERY_ROWS,
+    error_codes, AddRowValue, DbResult, QueryError, QueryResult, SchemaColumnDefinition,
+    SchemaMutationFailure, SchemaMutationResult, SchemaOperation, SchemaOperationType, TableColumn,
+    TableRelationship, DEFAULT_QUERY_TIMEOUT, MAX_QUERY_ROWS,
 };
-use mysql_async::{prelude::*, Value};
+use mysql_async::{prelude::*, Params, Value};
 use tokio::time::timeout;
 use tracing::debug;
+
+struct MariaDbInsertStatement {
+    query: String,
+    preview_query: String,
+    params: Vec<String>,
+}
 
 impl MariaDbConnection {
     pub(super) async fn impl_test_connection(&self) -> DbResult<()> {
@@ -286,5 +293,515 @@ impl MariaDbConnection {
         }
 
         Ok(logged_query)
+    }
+
+    pub(super) async fn impl_delete_rows(
+        &self,
+        table_name: &str,
+        primary_key_column: &str,
+        primary_key_values: &[String],
+    ) -> DbResult<u64> {
+        if primary_key_values.is_empty() {
+            return Ok(0);
+        }
+
+        let mut conn = self.get_conn().await?;
+        let placeholders = vec!["?"; primary_key_values.len()].join(", ");
+        let query = format!(
+            "DELETE FROM `{}` WHERE `{}` IN ({})",
+            escape_identifier(table_name),
+            escape_identifier(primary_key_column),
+            placeholders
+        );
+
+        let params = Params::Positional(
+            primary_key_values
+                .iter()
+                .cloned()
+                .map(Value::from)
+                .collect(),
+        );
+
+        timeout(DEFAULT_QUERY_TIMEOUT, conn.exec_drop(&query, params))
+            .await
+            .map_err(|_| QueryError::with_code("Delete timed out", error_codes::TIMEOUT_ERROR))?
+            .map_err(QueryError::for_query)?;
+
+        Ok(primary_key_values.len() as u64)
+    }
+
+    pub(super) async fn impl_add_row(
+        &self,
+        table_name: &str,
+        values: &[AddRowValue],
+    ) -> DbResult<String> {
+        let mut conn = self.get_conn().await?;
+        let statement = build_mariadb_insert_statement(table_name, values);
+        let params =
+            Params::Positional(statement.params.iter().cloned().map(Value::from).collect());
+
+        timeout(DEFAULT_QUERY_TIMEOUT, conn.exec_drop(&statement.query, params))
+            .await
+            .map_err(|_| QueryError::with_code("Insert timed out", error_codes::TIMEOUT_ERROR))?
+            .map_err(QueryError::for_query)?;
+
+        Ok(statement.preview_query)
+    }
+
+    pub(super) async fn impl_apply_schema_operations(
+        &self,
+        table_name: &str,
+        operations: &[SchemaOperation],
+    ) -> DbResult<SchemaMutationResult> {
+        if operations.is_empty() {
+            return Ok(SchemaMutationResult {
+                success: true,
+                total_operations: 0,
+                executed_operations: 0,
+                rolled_back: false,
+                failure: None,
+            });
+        }
+
+        let mut conn = self.get_conn().await?;
+        let total_operations = operations.len();
+        let mut executed_operations = 0;
+
+        for (index, operation) in operations.iter().enumerate() {
+            let statements = match build_mariadb_schema_statements(table_name, operation) {
+                Ok(statements) => statements,
+                Err(error) => {
+                    return Ok(build_schema_failure_result(
+                        total_operations,
+                        executed_operations,
+                        index,
+                        operation,
+                        error,
+                        None,
+                        false,
+                    ));
+                }
+            };
+
+            for statement in statements {
+                let execute_result = timeout(DEFAULT_QUERY_TIMEOUT, conn.query_drop(&statement)).await;
+
+                match execute_result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => {
+                        return Ok(build_schema_failure_result(
+                            total_operations,
+                            executed_operations,
+                            index,
+                            operation,
+                            QueryError::for_query(error),
+                            Some(statement),
+                            false,
+                        ));
+                    }
+                    Err(_) => {
+                        return Ok(build_schema_failure_result(
+                            total_operations,
+                            executed_operations,
+                            index,
+                            operation,
+                            QueryError::with_code(
+                                "Schema mutation timed out",
+                                error_codes::TIMEOUT_ERROR,
+                            )
+                            .with_hint(
+                                "MariaDB DDL may leave partial changes applied when a statement fails.",
+                            ),
+                            Some(statement),
+                            false,
+                        ));
+                    }
+                }
+            }
+
+            executed_operations += 1;
+        }
+
+        Ok(SchemaMutationResult {
+            success: true,
+            total_operations,
+            executed_operations,
+            rolled_back: false,
+            failure: None,
+        })
+    }
+}
+
+fn build_schema_failure_result(
+    total_operations: usize,
+    executed_operations: usize,
+    failed_operation_index: usize,
+    operation: &SchemaOperation,
+    error: QueryError,
+    failed_statement: Option<String>,
+    rolled_back: bool,
+) -> SchemaMutationResult {
+    SchemaMutationResult {
+        success: false,
+        total_operations,
+        executed_operations,
+        rolled_back,
+        failure: Some(SchemaMutationFailure {
+            failed_operation_index,
+            failed_operation_type: operation.operation_type.clone(),
+            message: error.message,
+            code: error.code,
+            detail: error.detail,
+            hint: error.hint,
+            failed_statement,
+        }),
+    }
+}
+
+fn build_mariadb_schema_statements(
+    table_name: &str,
+    operation: &SchemaOperation,
+) -> DbResult<Vec<String>> {
+    let quoted_table = quote_identifier(table_name);
+
+    match operation.operation_type {
+        SchemaOperationType::AddColumn => {
+            let definition = require_definition(operation, "ADD_COLUMN")?;
+            Ok(vec![format!(
+                "ALTER TABLE {} ADD COLUMN {} {}",
+                quoted_table,
+                quote_identifier(&definition.name),
+                build_column_definition_sql(definition)
+            )])
+        }
+        SchemaOperationType::DropColumn => Ok(vec![format!(
+            "ALTER TABLE {} DROP COLUMN {}",
+            quoted_table,
+            quote_identifier(&operation.column_name)
+        )]),
+        SchemaOperationType::ModifyColumn => {
+            let definition = require_definition(operation, "MODIFY_COLUMN")?;
+            Ok(vec![format!(
+                "ALTER TABLE {} MODIFY COLUMN {} {}",
+                quoted_table,
+                quote_identifier(&operation.column_name),
+                build_column_definition_sql(definition)
+            )])
+        }
+        SchemaOperationType::RenameColumn => {
+            let new_column_name = require_new_column_name(operation)?;
+            Ok(vec![format!(
+                "ALTER TABLE {} RENAME COLUMN {} TO {}",
+                quoted_table,
+                quote_identifier(&operation.column_name),
+                quote_identifier(new_column_name)
+            )])
+        }
+    }
+}
+
+fn require_definition<'a>(
+    operation: &'a SchemaOperation,
+    operation_name: &str,
+) -> DbResult<&'a SchemaColumnDefinition> {
+    operation.new_definition.as_ref().ok_or_else(|| {
+        QueryError::with_code(
+            format!("{} operation requires new_definition", operation_name),
+            error_codes::QUERY_ERROR,
+        )
+    })
+}
+
+fn require_new_column_name(operation: &SchemaOperation) -> DbResult<&str> {
+    operation.new_column_name.as_deref().ok_or_else(|| {
+        QueryError::with_code(
+            "RENAME_COLUMN operation requires new_column_name",
+            error_codes::QUERY_ERROR,
+        )
+    })
+}
+
+fn quote_identifier(identifier: &str) -> String {
+    format!("`{}`", escape_identifier(identifier))
+}
+
+fn build_mariadb_insert_statement(table_name: &str, values: &[AddRowValue]) -> MariaDbInsertStatement {
+    if values.is_empty() {
+        let quoted_table = quote_identifier(table_name);
+        return MariaDbInsertStatement {
+            query: format!("INSERT INTO {} () VALUES ()", quoted_table),
+            preview_query: format!("INSERT INTO {} () VALUES ()", quoted_table),
+            params: Vec::new(),
+        };
+    }
+
+    let quoted_table = quote_identifier(table_name);
+    let columns_sql = values
+        .iter()
+        .map(|value| quote_identifier(&value.column_name))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut query_values = Vec::with_capacity(values.len());
+    let mut preview_values = Vec::with_capacity(values.len());
+    let mut params = Vec::new();
+
+    for value in values {
+        if value.use_default {
+            query_values.push("DEFAULT".to_string());
+            preview_values.push("DEFAULT".to_string());
+            continue;
+        }
+
+        match value.value.as_deref() {
+            Some(raw_value) => {
+                query_values.push("?".to_string());
+                preview_values.push(format!("'{}'", escape_string(raw_value)));
+                params.push(raw_value.to_string());
+            }
+            None => {
+                query_values.push("NULL".to_string());
+                preview_values.push("NULL".to_string());
+            }
+        }
+    }
+
+    MariaDbInsertStatement {
+        query: format!(
+            "INSERT INTO {} ({}) VALUES ({})",
+            quoted_table,
+            columns_sql,
+            query_values.join(", ")
+        ),
+        preview_query: format!(
+            "INSERT INTO {} ({}) VALUES ({})",
+            quoted_table,
+            columns_sql,
+            preview_values.join(", ")
+        ),
+        params,
+    }
+}
+
+fn build_column_definition_sql(definition: &SchemaColumnDefinition) -> String {
+    let mut parts = Vec::with_capacity(3);
+    let mut type_sql = definition.data_type.to_uppercase();
+
+    if let Some(length) = definition.length.filter(|_| needs_length(&definition.data_type)) {
+        type_sql.push_str(&format!("({})", length));
+    }
+
+    parts.push(type_sql);
+    parts.push(if definition.is_nullable {
+        "NULL".to_string()
+    } else {
+        "NOT NULL".to_string()
+    });
+
+    if let Some(default_value) = definition.default_value.as_deref() {
+        if !default_value.is_empty() {
+            parts.push(format!(
+                "DEFAULT {}",
+                format_default_value(default_value, &definition.data_type)
+            ));
+        }
+    }
+
+    parts.join(" ")
+}
+
+fn needs_length(data_type: &str) -> bool {
+    matches!(
+        data_type.to_uppercase().as_str(),
+        "VARCHAR"
+            | "CHAR"
+            | "VARBINARY"
+            | "BINARY"
+            | "INT"
+            | "BIGINT"
+            | "SMALLINT"
+            | "TINYINT"
+            | "MEDIUMINT"
+            | "DECIMAL"
+            | "NUMERIC"
+            | "FLOAT"
+            | "DOUBLE"
+    )
+}
+
+fn format_default_value(value: &str, data_type: &str) -> String {
+    let upper_value = value.to_uppercase();
+    let upper_type = data_type.to_uppercase();
+
+    if upper_value == "NULL" {
+        return "NULL".to_string();
+    }
+
+    if matches!(
+        upper_value.as_str(),
+        "CURRENT_TIMESTAMP" | "NOW()" | "CURRENT_DATE" | "CURRENT_TIME" | "UUID()"
+    ) || upper_value.starts_with("CURRENT_TIMESTAMP")
+    {
+        return upper_value;
+    }
+
+    if matches!(
+        upper_type.as_str(),
+        "INT"
+            | "BIGINT"
+            | "SMALLINT"
+            | "TINYINT"
+            | "MEDIUMINT"
+            | "DECIMAL"
+            | "NUMERIC"
+            | "FLOAT"
+            | "DOUBLE"
+            | "REAL"
+    ) {
+        return value.to_string();
+    }
+
+    if matches!(upper_type.as_str(), "BOOLEAN" | "BOOL") {
+        match value.to_lowercase().as_str() {
+            "true" | "1" => return "TRUE".to_string(),
+            "false" | "0" => return "FALSE".to_string(),
+            _ => return value.to_string(),
+        }
+    }
+
+    format!("'{}'", escape_string(value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::connection::AddRowValue;
+
+    fn sample_definition() -> SchemaColumnDefinition {
+        SchemaColumnDefinition {
+            name: "email".to_string(),
+            data_type: "varchar".to_string(),
+            length: Some(255),
+            is_nullable: false,
+            is_primary_key: false,
+            default_value: Some("guest@example.com".to_string()),
+        }
+    }
+
+    #[test]
+    fn builds_add_column_statement_for_mariadb() {
+        let operation = SchemaOperation {
+            operation_type: SchemaOperationType::AddColumn,
+            column_name: "email".to_string(),
+            new_column_name: None,
+            new_definition: Some(sample_definition()),
+        };
+
+        let statements =
+            build_mariadb_schema_statements("users", &operation).expect("statement should build");
+
+        assert_eq!(
+            statements,
+            vec![String::from(
+                "ALTER TABLE `users` ADD COLUMN `email` VARCHAR(255) NOT NULL DEFAULT 'guest@example.com'"
+            )]
+        );
+    }
+
+    #[test]
+    fn rename_column_requires_new_column_name_for_mariadb() {
+        let operation = SchemaOperation {
+            operation_type: SchemaOperationType::RenameColumn,
+            column_name: "old_name".to_string(),
+            new_column_name: None,
+            new_definition: None,
+        };
+
+        let error = build_mariadb_schema_statements("users", &operation)
+            .expect_err("rename without new name should fail");
+
+        assert_eq!(error.code.as_deref(), Some(error_codes::QUERY_ERROR));
+        assert_eq!(
+            error.message,
+            "RENAME_COLUMN operation requires new_column_name"
+        );
+    }
+
+    #[test]
+    fn schema_failure_result_preserves_partial_apply_for_mariadb() {
+        let operation = SchemaOperation {
+            operation_type: SchemaOperationType::DropColumn,
+            column_name: "legacy_col".to_string(),
+            new_column_name: None,
+            new_definition: None,
+        };
+
+        let result = build_schema_failure_result(
+            3,
+            1,
+            1,
+            &operation,
+            QueryError::with_code("drop failed", error_codes::QUERY_ERROR),
+            Some("ALTER TABLE `users` DROP COLUMN `legacy_col`".to_string()),
+            false,
+        );
+
+        assert!(!result.success);
+        assert!(!result.rolled_back);
+        assert_eq!(result.executed_operations, 1);
+
+        let failure = result.failure.expect("failure should exist");
+        assert_eq!(failure.failed_operation_index, 1);
+        assert!(matches!(
+            failure.failed_operation_type,
+            SchemaOperationType::DropColumn
+        ));
+        assert_eq!(
+            failure.failed_statement.as_deref(),
+            Some("ALTER TABLE `users` DROP COLUMN `legacy_col`")
+        );
+    }
+
+    #[test]
+    fn builds_insert_statement_for_mariadb_with_defaults_and_nulls() {
+        let statement = build_mariadb_insert_statement(
+            "users",
+            &[
+                AddRowValue {
+                    column_name: "id".to_string(),
+                    value: None,
+                    use_default: true,
+                },
+                AddRowValue {
+                    column_name: "email".to_string(),
+                    value: Some("guest@example.com".to_string()),
+                    use_default: false,
+                },
+                AddRowValue {
+                    column_name: "bio".to_string(),
+                    value: None,
+                    use_default: false,
+                },
+            ],
+        );
+
+        assert_eq!(
+            statement.query,
+            "INSERT INTO `users` (`id`, `email`, `bio`) VALUES (DEFAULT, ?, NULL)"
+        );
+        assert_eq!(
+            statement.preview_query,
+            "INSERT INTO `users` (`id`, `email`, `bio`) VALUES (DEFAULT, 'guest@example.com', NULL)"
+        );
+        assert_eq!(statement.params, vec![String::from("guest@example.com")]);
+    }
+
+    #[test]
+    fn builds_empty_insert_statement_for_mariadb_when_request_is_empty() {
+        let statement = build_mariadb_insert_statement("audit_log", &[]);
+
+        assert_eq!(statement.query, "INSERT INTO `audit_log` () VALUES ()");
+        assert_eq!(statement.preview_query, "INSERT INTO `audit_log` () VALUES ()");
+        assert!(statement.params.is_empty());
     }
 }

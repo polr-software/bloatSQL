@@ -31,6 +31,7 @@ export interface QueryResult {
   rows: Record<string, unknown>[];
   rowCount: number;
   executionTime: number;
+  truncated: boolean;
 }
 
 export interface QueryError {
@@ -84,6 +85,17 @@ export interface TableRelationship {
   constraintName: string;
 }
 
+export interface AddRowValue {
+  columnName: string;
+  value: string | null;
+  useDefault: boolean;
+}
+
+export interface AddRowRequest {
+  tableName: string;
+  values: AddRowValue[];
+}
+
 // Cell update types
 export interface UpdateCellRequest {
   tableName: string;
@@ -93,11 +105,25 @@ export interface UpdateCellRequest {
   primaryKeyValue: string;
 }
 
-export interface UpdateCellError {
+export interface MutationErrorDetails {
   message: string;
   code?: string;
   detail?: string;
   hint?: string;
+}
+
+export interface AddRowError extends MutationErrorDetails {
+  table: string;
+}
+
+export interface AddRowResult {
+  success: boolean;
+  insertedCount: number;
+  error?: AddRowError;
+  executedQuery?: string;
+}
+
+export interface UpdateCellError extends MutationErrorDetails {
   table: string;
   column: string;
 }
@@ -108,29 +134,55 @@ export interface UpdateCellResult {
   executedQuery?: string;
 }
 
-/**
- * Formats an UpdateCellError into a user-friendly message.
- */
-export function formatUpdateCellError(error: UpdateCellError): string {
+export interface DeleteRowsRequest {
+  tableName: string;
+  primaryKeyColumn: string;
+  primaryKeyValues: string[];
+}
+
+export interface DeleteRowsError extends MutationErrorDetails {
+  table: string;
+  primaryKeyColumn: string;
+}
+
+export interface DeleteRowsResult {
+  success: boolean;
+  deletedCount: number;
+  error?: DeleteRowsError;
+  executedQuery?: string;
+}
+
+export function formatMutationError(error: MutationErrorDetails): string {
   const parts: string[] = [];
 
-  // Main error message
   parts.push(error.message);
 
-  // Add detail if present
   if (error.detail) {
     parts.push(`\nDetail: ${error.detail}`);
   }
 
-  // Add hint if present
   if (error.hint) {
     parts.push(`\nHint: ${error.hint}`);
   }
 
-  // Add error code for debugging
   if (error.code) {
     parts.push(`\n(Error code: ${error.code})`);
   }
 
   return parts.join('');
+}
+
+/**
+ * Formats an UpdateCellError into a user-friendly message.
+ */
+export function formatUpdateCellError(error: UpdateCellError): string {
+  return formatMutationError(error);
+}
+
+export function formatAddRowError(error: AddRowError): string {
+  return formatMutationError(error);
+}
+
+export function formatDeleteRowsError(error: DeleteRowsError): string {
+  return formatMutationError(error);
 }

@@ -14,6 +14,12 @@ import { DatabaseType } from '../../types/database';
 import { useApplyStructureChanges } from '../TableStructure/hooks/useApplyStructureChanges';
 import { useTableStructure } from '../TableStructure/hooks/useTableStructure';
 import { PendingChangesPreview } from '../TableStructure/components/PendingChangesPreview';
+import { useSchemaMutationSync } from '../../hooks/useSchemaMutationSync';
+import {
+  formatSchemaMutationError,
+  getSchemaMutationFailureNotification,
+  getSchemaMutationSuccessNotification,
+} from './schemaMutationFeedback';
 
 export function StructureEditControls() {
   const selectedTable = useSelectedTable();
@@ -36,6 +42,7 @@ export function StructureEditControls() {
   } = useStructureEditStore();
 
   const { applyChanges, isApplying: isApplyingHook } = useApplyStructureChanges();
+  const syncSchemaMutation = useSchemaMutationSync();
   const isApplying = isApplyingStore || isApplyingHook;
 
   const handleApplyChanges = useCallback(async () => {
@@ -44,33 +51,33 @@ export function StructureEditControls() {
     setApplying(true);
     setStoreError(null);
 
-    const result = await applyChanges(selectedTable, pendingOperations, dbType);
+    const result = await applyChanges(selectedTable, pendingOperations);
 
     setApplying(false);
 
     if (result.success) {
+      await Promise.all([refetch(), syncSchemaMutation(selectedTable)]);
+
       notifications.show({
         title: 'Success',
-        message: `Applied ${result.executedCount} structure change${result.executedCount !== 1 ? 's' : ''}`,
+        message: getSchemaMutationSuccessNotification(result.executedOperations),
         color: 'green',
       });
       clearAllPending();
       clearColumnDraft();
       stopEditing();
-      await refetch();
     } else {
-      const errorMsg = result.errors.join('\n\n');
+      const errorMsg = formatSchemaMutationError(result);
       setStoreError(errorMsg);
       notifications.show({
         title: 'Error',
-        message: `Applied ${result.executedCount}/${result.totalCount} operations. Check error details.`,
+        message: getSchemaMutationFailureNotification(result),
         color: 'red',
       });
     }
   }, [
     selectedTable,
     pendingOperations,
-    dbType,
     applyChanges,
     setApplying,
     setStoreError,
@@ -78,6 +85,7 @@ export function StructureEditControls() {
     clearColumnDraft,
     stopEditing,
     refetch,
+    syncSchemaMutation,
   ]);
 
   const handleCancelAll = useCallback(() => {

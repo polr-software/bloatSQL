@@ -7,16 +7,25 @@ import {
   Box,
   Menu,
 } from '@mantine/core';
-import { IconAlertCircle, IconDownload, IconTrash } from '@tabler/icons-react';
+import { IconAlertCircle, IconDownload, IconInfoCircle, IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { type ColumnDef, type Row, type RowSelectionState, type OnChangeFn } from '@tanstack/react-table';
-import { QueryResult, DatabaseType } from '../../types/database';
+import { QueryResult } from '../../types/database';
 import { useSelectCell, useSelectedCell } from '../../stores/editCellStore';
-import { useLoadedTable, useTableColumns, useRefreshTable } from '../../stores/queryStore';
-import { useActiveConnection } from '../../stores/connectionStore';
+import {
+  useLoadedTable,
+  useTableColumns,
+  useRefreshTable,
+} from '../../stores/queryExecutionStore';
 import { tauriCommands } from '../../tauri/commands';
 import { useRowSelectionStore } from '../../stores/rowSelectionStore';
 import { DataTable } from '../common/DataTable';
+import {
+  buildSelectedCellData,
+  buildTruncatedResultsMessage,
+  deleteRowsFromResults,
+  resolveContextMenuTargetRows,
+} from './resultsCard.logic';
 import styles from './ResultsCard.module.css';
 
 interface ResultsCardProps {
@@ -72,7 +81,6 @@ export function ResultsCard({
   const loadedTable = useLoadedTable();
   const tableColumns = useTableColumns();
   const refreshTable = useRefreshTable();
-  const activeConnection = useActiveConnection();
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -116,17 +124,15 @@ export function ResultsCard({
 
   const handleCellClick = useCallback(
     (rowIndex: number, columnName: string, rowData: Record<string, unknown>) => {
-      const primaryKeyColumn = tableColumns.find((col) => col.isPrimaryKey);
-      selectCell({
-        rowIndex,
-        columnName,
-        focusedColumn: columnName,
-        rowData,
-        tableName: loadedTable,
-        primaryKeyColumn: primaryKeyColumn?.name,
-        primaryKeyValue: primaryKeyColumn ? rowData[primaryKeyColumn.name] : undefined,
-        columns: tableColumns,
-      });
+      selectCell(
+        buildSelectedCellData({
+          rowIndex,
+          columnName,
+          rowData,
+          loadedTable,
+          tableColumns,
+        })
+      );
     },
     [tableColumns, selectCell, loadedTable]
   );
@@ -163,14 +169,11 @@ export function ResultsCard({
   // Rows that the context menu actions will target.
   // If the right-clicked row is part of a multi-row selection, all selected rows are targeted.
   const contextMenuTargetRows = useMemo(() => {
-    if (!contextMenu) return [];
-    const selectedRowsList = Object.keys(rowSelection)
-      .filter((id) => rowSelection[id])
-      .map((id) => rows[parseInt(id)])
-      .filter(Boolean) as Record<string, unknown>[];
-    const rightClickedIsSelected = selectedRowsList.some((r) => r === contextMenu.rowData);
-    if (rightClickedIsSelected && selectedRowsList.length > 1) return selectedRowsList;
-    return [contextMenu.rowData];
+    return resolveContextMenuTargetRows({
+      contextMenuRowData: contextMenu?.rowData ?? null,
+      rowSelection,
+      rows,
+    });
   }, [contextMenu, rowSelection, rows]);
 
   const handleExportRow = useCallback(() => {
@@ -182,46 +185,20 @@ export function ResultsCard({
   const handleDeleteRow = useCallback(async () => {
     if (contextMenu === null || !loadedTable) return;
 
-    const primaryKeyColumn = tableColumns.find((col) => col.isPrimaryKey);
-    if (!primaryKeyColumn) {
-      notifications.show({
-        title: 'Cannot delete',
-        message: 'No primary key column found for this table.',
-        color: 'red',
-      });
-      handleCloseContextMenu();
-      return;
-    }
-
-    const quote = activeConnection?.dbType === DatabaseType.PostgreSQL ? '"' : '`';
-    const quotedTable = `${quote}${loadedTable}${quote}`;
-    const quotedColumn = `${quote}${primaryKeyColumn.name}${quote}`;
-    const formatPk = (v: unknown) =>
-      typeof v === 'string' ? `'${v.replace(/'/g, "''")}'` : String(v);
-
-    const query =
-      contextMenuTargetRows.length > 1
-        ? `DELETE FROM ${quotedTable} WHERE ${quotedColumn} IN (${contextMenuTargetRows.map((r) => formatPk(r[primaryKeyColumn.name])).join(', ')})`
-        : `DELETE FROM ${quotedTable} WHERE ${quotedColumn} = ${formatPk(contextMenu.rowData[primaryKeyColumn.name])}`;
-
     handleCloseContextMenu();
 
-    try {
-      await tauriCommands.executeQuery(query);
-      notifications.show({
-        title: contextMenuTargetRows.length > 1 ? 'Rows deleted' : 'Row deleted',
-        message: `Deleted ${contextMenuTargetRows.length > 1 ? `${contextMenuTargetRows.length} rows` : '1 row'}`,
-        color: 'green',
-      });
-      await refreshTable();
-    } catch (error) {
-      notifications.show({
-        title: 'Delete failed',
-        message: String(error),
-        color: 'red',
-      });
-    }
-  }, [contextMenu, contextMenuTargetRows, loadedTable, tableColumns, activeConnection, handleCloseContextMenu, refreshTable]);
+    const notification = await deleteRowsFromResults({
+      loadedTable,
+      tableColumns,
+      targetRows: contextMenuTargetRows,
+      deleteRows: tauriCommands.deleteRows,
+      refreshTable,
+    });
+
+    notifications.show(notification);
+  }, [contextMenu, contextMenuTargetRows, loadedTable, tableColumns, handleCloseContextMenu, refreshTable]);
+
+  const truncatedMessage = buildTruncatedResultsMessage(results);
 
   return (
     <Box h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -235,6 +212,17 @@ export function ResultsCard({
           onClose={onClearError}
         >
           {error}
+        </Alert>
+      )}
+
+      {truncatedMessage && (
+        <Alert
+          icon={<IconInfoCircle size={16} />}
+          title="Results truncated"
+          color="yellow"
+          mb="md"
+        >
+          {truncatedMessage}
         </Alert>
       )}
 

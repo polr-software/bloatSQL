@@ -40,16 +40,6 @@ pub struct QueryError {
 }
 
 impl QueryError {
-    /// Creates a simple error with just a message.
-    pub fn simple(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            code: None,
-            detail: None,
-            hint: None,
-        }
-    }
-
     /// Creates an error with a message and code.
     pub fn with_code(message: impl Into<String>, code: impl Into<String>) -> Self {
         Self {
@@ -131,6 +121,93 @@ pub struct TableRelationship {
     pub to_column: String,
     /// Constraint name.
     pub constraint_name: String,
+}
+
+/// Single column value used by add-row mutations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddRowValue {
+    pub column_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub use_default: bool,
+}
+
+/// Column definition used by schema mutation operations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaColumnDefinition {
+    /// Column name after applying the operation.
+    pub name: String,
+    /// Database-specific data type.
+    pub data_type: String,
+    /// Optional type length/precision used by selected data types.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<u32>,
+    /// Whether the column accepts NULL values.
+    pub is_nullable: bool,
+    /// Whether the column should be a primary key.
+    ///
+    /// Note: current schema-edit flow does not yet apply primary key mutations.
+    pub is_primary_key: bool,
+    /// Optional column default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<String>,
+}
+
+/// Supported schema mutation operation kinds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SchemaOperationType {
+    AddColumn,
+    DropColumn,
+    ModifyColumn,
+    RenameColumn,
+}
+
+/// A single schema mutation operation sent from the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaOperation {
+    #[serde(rename = "type")]
+    pub operation_type: SchemaOperationType,
+    pub column_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_column_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_definition: Option<SchemaColumnDefinition>,
+}
+
+/// Structured schema mutation failure details.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaMutationFailure {
+    /// Zero-based index of the failed operation in the request payload.
+    pub failed_operation_index: usize,
+    /// Type of the failed operation.
+    pub failed_operation_type: SchemaOperationType,
+    /// Human-readable failure message.
+    pub message: String,
+    /// Optional driver or database error code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// Additional database detail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Optional hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    /// Statement that failed, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_statement: Option<String>,
+}
+
+/// Structured result returned from the backend schema mutation use-case.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaMutationResult {
+    pub success: bool,
+    pub total_operations: usize,
+    pub executed_operations: usize,
+    pub rolled_back: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<SchemaMutationFailure>,
 }
 
 pub type DbResult<T> = Result<T, QueryError>;
@@ -226,4 +303,31 @@ pub trait DatabaseConnection: Send + Sync {
         primary_key_column: &str,
         primary_key_value: &str,
     ) -> DbResult<String>;
+
+    /// Deletes one or more rows identified by primary key values.
+    ///
+    /// Primary key values are passed as strings and normalized by each driver.
+    async fn delete_rows(
+        &self,
+        table_name: &str,
+        primary_key_column: &str,
+        primary_key_values: &[String],
+    ) -> DbResult<u64>;
+
+    /// Inserts a single row using structured column values.
+    ///
+    /// Values may be inserted explicitly, as SQL NULL, or via the DEFAULT keyword.
+    /// Returns a preview SQL string suitable for logs and UI diagnostics.
+    async fn add_row(&self, table_name: &str, values: &[AddRowValue]) -> DbResult<String>;
+
+    /// Applies a set of schema mutations to a table.
+    ///
+    /// Implementations should use transactions where the underlying driver supports
+    /// transactional DDL. When transactions are not effective for DDL, the result must
+    /// indicate that rollback did not happen.
+    async fn apply_schema_operations(
+        &self,
+        table_name: &str,
+        operations: &[SchemaOperation],
+    ) -> DbResult<SchemaMutationResult>;
 }

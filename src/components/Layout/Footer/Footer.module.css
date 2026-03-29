@@ -1,24 +1,9 @@
 .footer {
     border-top: 1px solid var(--mantine-color-default-border);
     background-color: var(--mantine-color-body);
-    transition-property: height, opacity, border;
-    transition-duration: var(--app-shell-transition-duration);
-    transition-timing-function: var(--app-shell-transition-timing-function);
-    overflow: hidden;
     display: flex;
-    align-items: flex-start;
-    justify-content: center;
-}
-
-.footerHidden {
-    height: 0;
-    border-top: none;
-    opacity: 0;
-}
-
-.footerVisible {
-    height: 300px;
-    opacity: 1;
+    flex-direction: column;
+    align-items: stretch;
 }
 
 .controls {
@@ -31,4 +16,22 @@
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.panelHidden {
+    height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition-property: height, opacity;
+    transition-duration: var(--app-shell-transition-duration);
+    transition-timing-function: var(--app-shell-transition-timing-function);
+}
+
+.panelVisible {
+    height: 240px;
+    opacity: 1;
+    overflow: hidden;
+    transition-property: height, opacity;
+    transition-duration: var(--app-shell-transition-duration);
+    transition-timing-function: var(--app-shell-transition-timing-function);
 }

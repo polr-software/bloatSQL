@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(xargs ls:*)",
+      "Bash(cargo check:*)",
+      "WebFetch(domain:alpha.mantine.dev)",
+      "Bash(npx tsc:*)",
+      "Bash(bunx tsc:*)",
+      "Bash(bun add:*)",
+      "Bash(bun run:*)",
+      "Bash(grep \"\"version\"\":*)",
+      "Bash(./node_modules/.bin/vite build:*)"
     ]
   }
 }

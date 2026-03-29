@@ -1,323 +1,54 @@
+import { ConnectionModal } from './components/ConnectionManager';
 import {
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-} from "react";
-import { useDisclosure } from "@mantine/hooks";
-import { notifications } from "@mantine/notifications";
-import {
-  useConnections,
-  useActiveConnection,
-  useConnectionLoading,
-  useLoadConnections,
-  useConnectToDatabase,
-  useDisconnectFromDatabase,
-  useDeleteConnection,
-  usePingMs,
-  useMeasurePing,
-} from "./stores/connectionStore";
-import {
-  useQueryText,
-  useSetQueryText,
-  useQueryResults,
-  useIsExecuting,
-  useQueryError,
-  useLastExecutionTime,
-  useTables,
-  useIsLoadingTables,
-  useExecuteQuery,
-  useSelectTable,
-  useClearQueryError,
-  useDatabases,
-  useCurrentDatabase,
-  useIsLoadingDatabases,
-  useLoadDatabases,
-  useChangeDatabase,
-  useResetDatabaseState,
-  useRefreshTable,
-} from "./stores/queryStore";
-import {
-  useExportError,
-  useExportSuccessMessage,
-  useClearExportError,
-  useClearExportSuccess,
-} from "./stores/exportStore";
-import { useSetSelectedTable as useSetTableViewSelected } from "./stores/tableViewStore";
-import { useStructureEditStore } from "./stores/structureEditStore";
-import { useEditCellStore } from "./stores/editCellStore";
-import { Connection } from "./types/database";
-import {
-  Header,
-  Navbar,
   Aside,
-  HistoryItem,
-  MainContent,
   AppLayout,
-} from "./components/Layout";
-import { ConnectionModal } from "./components/ConnectionManager";
-import { ExportModal } from "./components/modals";
-import { tauriCommands } from "./tauri/commands";
-import { useNavigationHistory } from "./hooks/useNavigationHistory";
+  Header,
+  MainContent,
+  Navbar,
+} from './components/Layout';
+import { ExportModal } from './components/modals';
+import { useAppController } from './hooks/useAppController';
 
 function App() {
-  const connections = useConnections();
-  const activeConnection = useActiveConnection();
-  const connectionLoading = useConnectionLoading();
-  const loadConnections = useLoadConnections();
-  const connectToDatabase = useConnectToDatabase();
-  const disconnectFromDatabase = useDisconnectFromDatabase();
-  const deleteConnection = useDeleteConnection();
-
-  const pingMs = usePingMs();
-  const measurePing = useMeasurePing();
-
-  const queryText = useQueryText();
-  const setQueryText = useSetQueryText();
-  const results = useQueryResults();
-  const isExecuting = useIsExecuting();
-  const queryError = useQueryError();
-  const lastExecutionTime = useLastExecutionTime();
-  const tables = useTables();
-  const isLoadingTables = useIsLoadingTables();
-  const executeQuery = useExecuteQuery();
-  const selectTable = useSelectTable();
-  const clearError = useClearQueryError();
-  const databases = useDatabases();
-  const currentDatabase = useCurrentDatabase();
-  const isLoadingDatabases = useIsLoadingDatabases();
-  const loadDatabases = useLoadDatabases();
-  const changeDatabase = useChangeDatabase();
-  const resetDatabaseState = useResetDatabaseState();
-  const refreshTable = useRefreshTable();
-
-  const exportError = useExportError();
-  const successMessage = useExportSuccessMessage();
-  const clearExportError = useClearExportError();
-  const clearSuccess = useClearExportSuccess();
-
-  const [selectedTable, setSelectedTable] = useState<string | null>(null);
-
-  const navigationHistory = useNavigationHistory<string>(
-    (tableName) => {
-      setSelectedTable(tableName);
-      setTableViewSelected(tableName);
-      selectTable(tableName);
-    },
-    (a, b) => a === b
-  );
-
-  const [
+  const {
+    connections,
+    activeConnection,
+    connectionLoading,
+    pingMs,
+    queryText,
+    results,
+    isExecuting,
+    queryError,
+    tables,
+    isLoadingTables,
+    databases,
+    currentDatabase,
+    isLoadingDatabases,
+    selectedTable,
+    queryHistory,
     connectionFormOpened,
-    { open: openConnectionForm, close: closeConnectionForm },
-  ] = useDisclosure(false);
-  const [
     exportModalOpened,
-    { open: openExportModal, close: closeExportModal },
-  ] = useDisclosure(false);
-  const [editingConnection, setEditingConnection] = useState<Connection | null>(
-    null,
-  );
-  const [exportRowData, setExportRowData] = useState<Record<string, unknown> | Record<string, unknown>[] | undefined>(undefined);
-
-  const setTableViewSelected = useSetTableViewSelected();
-
-  const [queryHistory, setQueryHistory] = useState<HistoryItem[]>([]);
-
-  useEffect(() => {
-    tauriCommands.closeSplashscreen();
-  }, []);
-
-  useEffect(() => {
-    loadConnections();
-  }, [loadConnections]);
-
-  useEffect(() => {
-    if (activeConnection) {
-      loadDatabases();
-    }
-  }, [activeConnection, loadDatabases]);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'F5') {
-        event.preventDefault();
-        if (activeConnection) {
-          refreshTable();
-          notifications.show({
-            title: "Odświeżanie",
-            message: "Dane zostały odświeżone",
-            color: "blue",
-          });
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeConnection, refreshTable]);
-
-  useEffect(() => {
-    if (successMessage) {
-      notifications.show({
-        title: "Success",
-        message: successMessage,
-        color: "green",
-      });
-      clearSuccess();
-    }
-  }, [successMessage, clearSuccess]);
-
-  useEffect(() => {
-    if (exportError) {
-      notifications.show({
-        title: "Error",
-        message: exportError,
-        color: "red",
-      });
-      clearExportError();
-    }
-  }, [exportError, clearExportError]);
-
-  const handleExecute = useCallback(async () => {
-    if (!activeConnection) return;
-
-    await executeQuery();
-
-    const currentTime = lastExecutionTime;
-    if (currentTime !== null) {
-      setQueryHistory((prev) =>
-        [
-          {
-            query: queryText,
-            timestamp: new Date(),
-            executionTime: currentTime,
-          },
-          ...prev,
-        ].slice(0, 20),
-      );
-    }
-  }, [activeConnection, executeQuery, lastExecutionTime, queryText]);
-
-  const handleConnect = useCallback(
-    async (connection: Connection) => {
-      try {
-        await connectToDatabase(connection);
-      } catch (error) {
-        console.error("Failed to connect:", error);
-      }
-    },
-    [connectToDatabase],
-  );
-
-  const handleDisconnect = useCallback(async () => {
-    try {
-      await disconnectFromDatabase();
-      resetDatabaseState();
-      setSelectedTable(null);
-      setTableViewSelected(null);
-      useStructureEditStore.getState().stopEditing();
-      useEditCellStore.getState().clearSelection();
-      useEditCellStore.getState().stopAddRow();
-    } catch (error) {
-      console.error("Failed to disconnect:", error);
-    }
-  }, [disconnectFromDatabase, resetDatabaseState, setTableViewSelected]);
-
-  const handleRefreshConnection = useCallback(async () => {
-    if (!activeConnection) return;
-    await Promise.all([loadDatabases(), measurePing()]);
-  }, [activeConnection, loadDatabases, measurePing]);
-
-  const handleDatabaseChange = useCallback(
-    async (database: string) => {
-      try {
-        await changeDatabase(database);
-        setSelectedTable(null);
-        setTableViewSelected(null);
-        useStructureEditStore.getState().stopEditing();
-        useEditCellStore.getState().clearSelection();
-        useEditCellStore.getState().stopAddRow();
-      } catch (error) {
-        console.error("Failed to change database:", error);
-      }
-    },
-    [changeDatabase, setTableViewSelected],
-  );
-
-  const handleDeleteConnection = useCallback(
-    async (id: string) => {
-      if (confirm("Are you sure you want to delete this connection?")) {
-        try {
-          await deleteConnection(id);
-          await loadConnections();
-        } catch (error) {
-          console.error("Failed to delete connection:", error);
-        }
-      }
-    },
-    [deleteConnection, loadConnections],
-  );
-
-  const handleEditConnection = useCallback(
-    (connection: Connection) => {
-      setEditingConnection(connection);
-      openConnectionForm();
-    },
-    [openConnectionForm],
-  );
-
-  const handleCloseConnectionForm = useCallback(() => {
-    closeConnectionForm();
-    setEditingConnection(null);
-    loadConnections();
-  }, [closeConnectionForm, loadConnections]);
-
-  const handleConnectionFormSuccess = useCallback(() => {
-    closeConnectionForm();
-    setEditingConnection(null);
-    loadConnections();
-  }, [closeConnectionForm, loadConnections]);
-
-  const handleTableSelect = useCallback(
-    (tableName: string) => {
-      setSelectedTable(tableName);
-      setTableViewSelected(tableName);
-      selectTable(tableName);
-      navigationHistory.push(tableName);
-    },
-    [selectTable, setTableViewSelected, navigationHistory],
-  );
-
-
-  const loadQueryFromHistory = useCallback(
-    (query: string) => {
-      setQueryText(query);
-    },
-    [setQueryText],
-  );
-
-  const handleQueryChange = useCallback(
-    (query: string) => {
-      setQueryText(query);
-    },
-    [setQueryText],
-  );
-
-  const handleOpenExportModalWithRow = useCallback(
-    (rowData?: Record<string, unknown> | Record<string, unknown>[]) => {
-      setExportRowData(rowData);
-      openExportModal();
-    },
-    [openExportModal],
-  );
-
-  const handleCloseExportModal = useCallback(() => {
-    closeExportModal();
-    setExportRowData(undefined);
-  }, [closeExportModal]);
-
-  const isConnected = useMemo(() => !!activeConnection, [activeConnection]);
+    editingConnection,
+    exportRowData,
+    isConnected,
+    navigationHistory,
+    clearError,
+    setQueryText,
+    openConnectionForm,
+    openExportModal,
+    handleExecute,
+    handleConnect,
+    handleDisconnect,
+    handleEditConnection,
+    handleDeleteConnection,
+    handleTableSelect,
+    handleDatabaseChange,
+    handleRefreshConnection,
+    handleCloseConnectionForm,
+    handleConnectionFormSuccess,
+    handleOpenExportModalWithRow,
+    handleCloseExportModal,
+  } = useAppController();
 
   return (
     <>
@@ -349,7 +80,7 @@ function App() {
             onDeleteConnection={handleDeleteConnection}
             onSelectTable={handleTableSelect}
             onDatabaseChange={handleDatabaseChange}
-            onLoadQuery={loadQueryFromHistory}
+            onLoadQuery={setQueryText}
             onRefresh={handleRefreshConnection}
           />
         }
@@ -359,7 +90,7 @@ function App() {
       >
         <MainContent
           queryText={queryText}
-          handleQueryChange={handleQueryChange}
+          handleQueryChange={setQueryText}
           handleExecute={handleExecute}
           isExecuting={isExecuting}
           isConnected={isConnected}

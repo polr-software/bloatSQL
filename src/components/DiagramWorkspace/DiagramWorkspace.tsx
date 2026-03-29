@@ -1,74 +1,79 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Center, Loader, Stack, Text } from '@mantine/core';
 import { ReactFlowProvider } from '@xyflow/react';
 
 import { useDiagramStore } from '../../stores/diagramStore';
 import { useConnectionStore } from '../../stores/connectionStore';
-import { tauriCommands } from '../../tauri/commands';
+import { useCurrentDatabase } from '../../stores/databaseBrowserStore';
+import {
+  getSchemaCacheKey,
+  useSchemaEntry,
+  useSchemaError,
+  useSchemaLoading,
+  useSchemaStore,
+} from '../../stores/schemaStore';
 import { transformToReactFlow } from './utils/dataTransform';
 import { getLayoutedElements } from './utils/layoutAlgorithms';
 import { DiagramCanvas } from './DiagramCanvas';
 
 export function DiagramWorkspace() {
   const activeConnection = useConnectionStore((s) => s.activeConnection);
+  const currentDatabase = useCurrentDatabase();
+  const schemaCacheKey = getSchemaCacheKey(activeConnection?.id, currentDatabase);
 
   const nodes = useDiagramStore((s) => s.nodes);
   const showColumnTypes = useDiagramStore((s) => s.showColumnTypes);
   const showOnlyKeys = useDiagramStore((s) => s.showOnlyKeys);
-  const isLoading = useDiagramStore((s) => s.isLoading);
-  const error = useDiagramStore((s) => s.error);
   const setNodes = useDiagramStore((s) => s.setNodes);
   const setEdges = useDiagramStore((s) => s.setEdges);
-  const setLoading = useDiagramStore((s) => s.setLoading);
   const setError = useDiagramStore((s) => s.setError);
 
-  const loadDiagramData = useCallback(async () => {
-    if (!activeConnection) {
-      setError('No active connection');
+  const schemaEntry = useSchemaEntry(schemaCacheKey);
+  const isLoading = useSchemaLoading();
+  const schemaError = useSchemaError();
+  const loadFullSchema = useSchemaStore((s) => s.loadFullSchema);
+
+  useEffect(() => {
+    if (!schemaCacheKey) return;
+
+    void loadFullSchema(schemaCacheKey).catch((error) => {
+      console.error('Failed to load diagram data:', error);
+    });
+  }, [loadFullSchema, schemaCacheKey]);
+
+  const transformedGraph = useMemo(() => {
+    if (!schemaEntry) return null;
+
+    const tableColumnsMap = new Map(
+      Object.entries(schemaEntry.columnsByTable).map(([tableName, columns]) => [tableName, columns])
+    );
+
+    return transformToReactFlow(
+      tableColumnsMap,
+      schemaEntry.relationships,
+      showColumnTypes,
+      showOnlyKeys
+    );
+  }, [schemaEntry, showColumnTypes, showOnlyKeys]);
+
+  useEffect(() => {
+    if (!transformedGraph) {
       return;
     }
 
-    try {
-      setLoading(true);
-      setError(null);
+    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+      transformedGraph.nodes,
+      transformedGraph.edges
+    );
 
-      const tableNames = await tauriCommands.listTables();
-      const tableColumnsMap = new Map();
-
-      for (const tableName of tableNames) {
-        const columns = await tauriCommands.getTableColumns(tableName);
-        tableColumnsMap.set(tableName, columns);
-      }
-
-      const relationships = await tauriCommands.getTableRelationships();
-
-      const { nodes: transformedNodes, edges: transformedEdges } = transformToReactFlow(
-        tableColumnsMap,
-        relationships,
-        showColumnTypes,
-        showOnlyKeys
-      );
-
-      const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-        transformedNodes,
-        transformedEdges
-      );
-
-      setNodes(layoutedNodes);
-      setEdges(layoutedEdges);
-    } catch (err) {
-      console.error('Failed to load diagram data:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load diagram');
-    } finally {
-      setLoading(false);
-    }
-  }, [activeConnection, showColumnTypes, showOnlyKeys, setNodes, setEdges, setLoading, setError]);
+    setNodes(layoutedNodes);
+    setEdges(layoutedEdges);
+    setError(null);
+  }, [setEdges, setError, setNodes, transformedGraph]);
 
   useEffect(() => {
-    if (activeConnection) {
-      loadDiagramData();
-    }
-  }, [activeConnection, loadDiagramData]);
+    setError(schemaError);
+  }, [schemaError, setError]);
 
   if (!activeConnection) {
     return (
@@ -80,7 +85,17 @@ export function DiagramWorkspace() {
     );
   }
 
-  if (isLoading) {
+  if (!currentDatabase) {
+    return (
+      <Center h="100%">
+        <Stack align="center" gap="md">
+          <Text c="dimmed">Select a database to view the diagram</Text>
+        </Stack>
+      </Center>
+    );
+  }
+
+  if (isLoading && !schemaEntry) {
     return (
       <Center h="100%">
         <Stack align="center" gap="md">
@@ -91,7 +106,7 @@ export function DiagramWorkspace() {
     );
   }
 
-  if (error) {
+  if (schemaError) {
     return (
       <Center h="100%">
         <Stack align="center" gap="md">
@@ -99,14 +114,14 @@ export function DiagramWorkspace() {
             Error loading diagram
           </Text>
           <Text c="dimmed" size="sm">
-            {error}
+            {schemaError}
           </Text>
         </Stack>
       </Center>
     );
   }
 
-  if (nodes.length === 0) {
+  if (!schemaEntry || schemaEntry.tables.length === 0 || nodes.length === 0) {
     return (
       <Center h="100%">
         <Stack align="center" gap="md">
@@ -117,8 +132,8 @@ export function DiagramWorkspace() {
   }
 
   return (
-      <ReactFlowProvider>
-        <DiagramCanvas />
-      </ReactFlowProvider>
+    <ReactFlowProvider>
+      <DiagramCanvas />
+    </ReactFlowProvider>
   );
 }

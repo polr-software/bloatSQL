@@ -1,9 +1,11 @@
-import { useMemo, useCallback, useEffect, useState } from 'react';
+import { useMemo, useCallback, useEffect } from 'react';
 import { Tree, useTree, Group, Loader, Center, Stack, Text } from '@mantine/core';
 import { IconTable, IconKey, IconColumns } from '@tabler/icons-react';
 import type { TreeNodeData, RenderTreeNodePayload } from '@mantine/core';
 import type { TableColumn } from '../../../types/database';
-import { tauriCommands } from '../../../tauri/commands';
+import { useActiveConnection } from '../../../stores/connectionStore';
+import { useCurrentDatabase } from '../../../stores/databaseBrowserStore';
+import { getSchemaCacheKey, useSchemaEntry, useSchemaStore } from '../../../stores/schemaStore';
 import classes from './DatabaseTree.module.css';
 
 interface DatabaseTreeProps {
@@ -47,31 +49,19 @@ export function DatabaseTree({
   onSelectTable,
   searchQuery,
 }: DatabaseTreeProps) {
-  const [tableColumns, setTableColumns] = useState<Record<string, TableColumn[]>>({});
-  const [loadingColumns, setLoadingColumns] = useState<Set<string>>(new Set());
+  const activeConnection = useActiveConnection();
+  const currentDatabase = useCurrentDatabase();
+  const schemaCacheKey = getSchemaCacheKey(activeConnection?.id, currentDatabase);
+  const schemaEntry = useSchemaEntry(schemaCacheKey);
+  const loadingColumns = useSchemaStore((s) => s.loadingColumns);
+  const ensureTableColumns = useSchemaStore((s) => s.ensureTableColumns);
 
   const loadColumnsForTable = useCallback((tableName: string) => {
-    if (tableColumns[tableName] || loadingColumns.has(tableName)) {
-      return;
-    }
-
-    setLoadingColumns((prev) => new Set(prev).add(tableName));
-
-    tauriCommands.getTableColumns(tableName)
-      .then((columns) => {
-        setTableColumns((prev) => ({ ...prev, [tableName]: columns }));
-      })
-      .catch((error) => {
-        console.error('Failed to load columns:', error);
-      })
-      .finally(() => {
-        setLoadingColumns((prev) => {
-          const newSet = new Set(prev);
-          newSet.delete(tableName);
-          return newSet;
-        });
-      });
-  }, [tableColumns, loadingColumns]);
+    if (!schemaCacheKey) return;
+    void ensureTableColumns(schemaCacheKey, tableName).catch((error) => {
+      console.error('Failed to load columns:', error);
+    });
+  }, [ensureTableColumns, schemaCacheKey]);
 
   const filteredTables = useMemo(
     () => tables?.filter((table) =>
@@ -82,8 +72,9 @@ export function DatabaseTree({
 
   const treeData = useMemo<DatabaseTreeNode[]>(() => {
     return filteredTables.map((table) => {
-      const columns = tableColumns[table];
-      const isLoading = loadingColumns.has(table);
+      const columns = schemaEntry?.columnsByTable[table];
+      const resolvedColumns = columns ?? [];
+      const isLoading = !!(schemaCacheKey && loadingColumns[`${schemaCacheKey}:${table}`]);
       const hasData = columns !== undefined;
 
       const node: TableNode = {
@@ -99,8 +90,8 @@ export function DatabaseTree({
               label: 'Loading...',
               nodeType: 'column',
             } as ColumnNode]
-            : columns.length > 0
-              ? columns.map((column): ColumnNode => ({
+            : resolvedColumns.length > 0
+              ? resolvedColumns.map((column): ColumnNode => ({
                 value: `column-${table}-${column.name}`,
                 label: column.name,
                 nodeType: 'column',
@@ -115,7 +106,7 @@ export function DatabaseTree({
 
       return node;
     });
-  }, [filteredTables, tableColumns, loadingColumns]);
+  }, [filteredTables, loadingColumns, schemaCacheKey, schemaEntry]);
 
   const tree = useTree({
     initialExpandedState: selectedTable ? { [`table-${selectedTable}`]: true } : {},
@@ -128,18 +119,13 @@ export function DatabaseTree({
   });
 
   useEffect(() => {
-    setTableColumns({});
-    setLoadingColumns(new Set());
-  }, [tables]);
-
-  useEffect(() => {
     if (selectedTable) {
       tree.select(`table-${selectedTable}`);
       tree.expand(`table-${selectedTable}`);
       loadColumnsForTable(selectedTable);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTable]);
+  }, [selectedTable, loadColumnsForTable, tree]);
 
   const renderNode = useCallback(
     ({ node, elementProps }: RenderTreeNodePayload) => {

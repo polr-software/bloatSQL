@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AppShell,
   Stack,
@@ -18,37 +18,17 @@ import {
   useAddRowColumns,
   useEditCellStore,
 } from '../../stores/editCellStore';
+import { useQueryExecutionStore } from '../../stores/queryExecutionStore';
 import { tauriCommands } from '../../tauri/commands';
-import { useQueryStore } from '../../stores/queryStore';
-import { useConnectionStore } from '../../stores/connectionStore';
-import { DatabaseType, TableColumn } from '../../types/database';
-
-function quoteIdentifier(name: string, dbType: DatabaseType): string {
-  if (dbType === DatabaseType.PostgreSQL) {
-    return `"${name.replace(/"/g, '""')}"`;
-  }
-  return `\`${name.replace(/`/g, '``')}\``;
-}
-
-function escapeValue(value: string): string {
-  return value.replace(/'/g, "''");
-}
-
-function isColumnRequired(col: TableColumn): boolean {
-  return !col.isNullable && !col.isPrimaryKey && col.columnDefault == null;
-}
-
-function buildValidate(columns: TableColumn[]) {
-  return (values: Record<string, string>) => {
-    const errors: Record<string, string> = {};
-    for (const col of columns) {
-      if (isColumnRequired(col) && (!values[col.name] || values[col.name].trim() === '')) {
-        errors[col.name] = 'To pole jest wymagane';
-      }
-    }
-    return errors;
-  };
-}
+import {
+  buildAddRowInitialValues,
+  canAddRowColumnBeNull,
+  getAddRowDescription,
+  getAddRowPlaceholder,
+  isAddRowColumnRequired,
+  submitAddRowForm,
+  validateAddRowValues,
+} from './addRowForm.logic';
 
 
 export function AddRowForm() {
@@ -58,46 +38,43 @@ export function AddRowForm() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showInserted, setShowInserted] = useState(false);
-
-  const initialValues = columns.reduce((acc, col) => {
-    acc[col.name] = '';
-    return acc;
-  }, {} as Record<string, string>);
+  const [nullColumns, setNullColumns] = useState<Record<string, boolean>>({});
 
   const form = useForm({
     mode: 'controlled',
-    initialValues,
-    validate: buildValidate(columns),
+    initialValues: buildAddRowInitialValues(columns),
+    validate: (values) => validateAddRowValues(columns, values, nullColumns),
+    validateInputOnChange: true,
   });
 
-  const handleSubmit = async (values: Record<string, string>) => {
-    if (!tableName) return;
+  useEffect(() => {
+    const initialValues = buildAddRowInitialValues(columns);
+    form.setInitialValues(initialValues);
+    form.reset();
+    setNullColumns({});
+    setError(null);
+    setShowInserted(false);
+  }, [columns, tableName]);
 
+  const handleSubmit = async (values: Record<string, string>) => {
     setIsSaving(true);
     setError(null);
 
     try {
-      const dbType = useConnectionStore.getState().activeConnection?.dbType ?? DatabaseType.MariaDB;
-      const quotedTable = quoteIdentifier(tableName, dbType);
-
-      const columnNames = columns.map((col) => quoteIdentifier(col.name, dbType)).join(', ');
-      const valueParts = columns.map((col) => {
-        const val = values[col.name];
-        if (val === '' || val === undefined) {
-          return 'DEFAULT';
-        }
-        return `'${escapeValue(val)}'`;
+      await submitAddRowForm({
+        tableName,
+        columns,
+        values,
+        nullColumns,
+        addRow: tauriCommands.addRow,
+        refreshTable: useQueryExecutionStore.getState().refreshTable,
       });
-
-      const sql = `INSERT INTO ${quotedTable} (${columnNames}) VALUES (${valueParts.join(', ')})`;
-
-      await tauriCommands.executeQuery(sql);
-      await useQueryStore.getState().refreshTable();
 
       setShowInserted(true);
       setTimeout(() => setShowInserted(false), 2000);
 
       form.reset();
+      setNullColumns({});
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       setError(errorMsg);
@@ -113,6 +90,25 @@ export function AddRowForm() {
   if (!tableName) return null;
 
   const hasErrors = Object.keys(form.errors).length > 0;
+
+  const handleFieldChange = (columnName: string, value: string) => {
+    if (nullColumns[columnName]) {
+      setNullColumns((current) => ({
+        ...current,
+        [columnName]: false,
+      }));
+    }
+
+    form.setFieldValue(columnName, value);
+  };
+
+  const toggleNullValue = (columnName: string) => {
+    setNullColumns((current) => ({
+      ...current,
+      [columnName]: !current[columnName],
+    }));
+    form.setFieldValue(columnName, '');
+  };
 
   return (
     <>
@@ -139,14 +135,11 @@ export function AddRowForm() {
         <form onSubmit={form.onSubmit(handleSubmit)}>
           <Stack gap="md">
             {columns.map((col) => {
-              const required = isColumnRequired(col);
-              const placeholder = col.columnDefault
-                ? `Default: ${col.columnDefault}`
-                : col.isPrimaryKey
-                  ? 'Auto / leave empty for DEFAULT'
-                  : col.isNullable
-                    ? 'NULL if empty'
-                    : 'Required';
+              const required = isAddRowColumnRequired(col);
+              const placeholder = getAddRowPlaceholder(col);
+              const useNull = Boolean(nullColumns[col.name]);
+              const canUseNull = canAddRowColumnBeNull(col);
+              const description = getAddRowDescription(col, useNull);
 
               const label = (
                 <Group gap={4}>
@@ -157,17 +150,33 @@ export function AddRowForm() {
               );
 
               return (
-                <SmartColumnInput
-                  key={col.name}
-                  dataType={col.dataType}
-                  value={form.values[col.name] ?? ''}
-                  onChange={(val) => form.setFieldValue(col.name, val)}
-                  label={label}
-                  placeholder={placeholder}
-                  withAsterisk={required}
-                  error={form.errors[col.name]}
-                  disabled={isSaving}
-                />
+                <Stack key={col.name} gap={4}>
+                  <SmartColumnInput
+                    dataType={col.dataType}
+                    value={form.values[col.name] ?? ''}
+                    onChange={(val) => handleFieldChange(col.name, val)}
+                    label={label}
+                    placeholder={placeholder}
+                    description={description}
+                    withAsterisk={required}
+                    error={form.errors[col.name]}
+                    disabled={isSaving || useNull}
+                  />
+                  {canUseNull && (
+                    <Group justify="flex-end">
+                      <Button
+                        type="button"
+                        size="xs"
+                        variant={useNull ? 'filled' : 'light'}
+                        color={useNull ? 'blue' : 'gray'}
+                        onClick={() => toggleNullValue(col.name)}
+                        disabled={isSaving}
+                      >
+                        {useNull ? 'Using NULL' : 'Use NULL'}
+                      </Button>
+                    </Group>
+                  )}
+                </Stack>
               );
             })}
           </Stack>

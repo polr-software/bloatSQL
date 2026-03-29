@@ -5,10 +5,19 @@ import {
   ExportOptions,
   TableColumn,
   TableRelationship,
+  AddRowRequest,
+  AddRowResult,
   UpdateCellRequest,
   UpdateCellResult,
-  formatUpdateCellError,
+  DeleteRowsRequest,
+  DeleteRowsResult,
 } from '../types/database';
+import {
+  ApplySchemaOperationsRequest,
+  ApplySchemaOperationsResult,
+  AlterColumnOperation,
+  ColumnDefinition,
+} from '../types/tableStructure';
 
 interface BackendConnection {
   id: string;
@@ -50,6 +59,86 @@ interface BackendTableRelationship {
   constraint_name: string;
 }
 
+interface BackendQueryResult {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  row_count: number;
+  execution_time: number;
+  truncated: boolean;
+}
+
+interface BackendSchemaColumnDefinition {
+  name: string;
+  data_type: string;
+  length?: number | null;
+  is_nullable: boolean;
+  is_primary_key: boolean;
+  default_value?: string | null;
+}
+
+interface BackendSchemaOperation {
+  type: AlterColumnOperation['type'];
+  column_name: string;
+  new_column_name?: string;
+  new_definition?: BackendSchemaColumnDefinition;
+}
+
+interface BackendApplySchemaOperationsResult {
+  success: boolean;
+  total_operations: number;
+  executed_operations: number;
+  rolled_back: boolean;
+  failure?: {
+    failed_operation_index: number;
+    failed_operation_type: AlterColumnOperation['type'];
+    message: string;
+    code?: string;
+    detail?: string;
+    hint?: string;
+    failed_statement?: string;
+  };
+}
+
+interface BackendUpdateCellResult {
+  success: boolean;
+  error?: {
+    message: string;
+    code?: string;
+    detail?: string;
+    hint?: string;
+    table: string;
+    column: string;
+  };
+  executed_query?: string;
+}
+
+interface BackendAddRowResult {
+  success: boolean;
+  inserted_count: number;
+  error?: {
+    message: string;
+    code?: string;
+    detail?: string;
+    hint?: string;
+    table: string;
+  };
+  executed_query?: string;
+}
+
+interface BackendDeleteRowsResult {
+  success: boolean;
+  deleted_count: number;
+  error?: {
+    message: string;
+    code?: string;
+    detail?: string;
+    hint?: string;
+    table: string;
+    primary_key_column: string;
+  };
+  executed_query?: string;
+}
+
 function toFrontendTableColumn(col: BackendTableColumn): TableColumn {
   return {
     name: col.name,
@@ -69,6 +158,95 @@ function toFrontendTableRelationship(rel: BackendTableRelationship): TableRelati
     toTable: rel.to_table,
     toColumn: rel.to_column,
     constraintName: rel.constraint_name,
+  };
+}
+
+function toFrontendQueryResult(result: BackendQueryResult): QueryResult {
+  return {
+    columns: result.columns,
+    rows: result.rows,
+    rowCount: result.row_count,
+    executionTime: result.execution_time,
+    truncated: result.truncated,
+  };
+}
+
+function toBackendColumnDefinition(definition: ColumnDefinition): BackendSchemaColumnDefinition {
+  return {
+    name: definition.name,
+    data_type: definition.dataType,
+    length: definition.length ?? null,
+    is_nullable: definition.isNullable,
+    is_primary_key: definition.isPrimaryKey,
+    default_value: definition.defaultValue ?? null,
+  };
+}
+
+function toBackendSchemaOperation(operation: AlterColumnOperation): BackendSchemaOperation {
+  return {
+    type: operation.type,
+    column_name: operation.columnName,
+    new_column_name: operation.newColumnName,
+    new_definition: operation.newDefinition
+      ? toBackendColumnDefinition(operation.newDefinition)
+      : undefined,
+  };
+}
+
+function toFrontendApplySchemaOperationsResult(
+  result: BackendApplySchemaOperationsResult
+): ApplySchemaOperationsResult {
+  return {
+    success: result.success,
+    totalOperations: result.total_operations,
+    executedOperations: result.executed_operations,
+    rolledBack: result.rolled_back,
+    failure: result.failure
+      ? {
+          failedOperationIndex: result.failure.failed_operation_index,
+          failedOperationType: result.failure.failed_operation_type,
+          message: result.failure.message,
+          code: result.failure.code,
+          detail: result.failure.detail,
+          hint: result.failure.hint,
+          failedStatement: result.failure.failed_statement,
+        }
+      : undefined,
+  };
+}
+
+function toFrontendUpdateCellResult(result: BackendUpdateCellResult): UpdateCellResult {
+  return {
+    success: result.success,
+    error: result.error,
+    executedQuery: result.executed_query,
+  };
+}
+
+function toFrontendAddRowResult(result: BackendAddRowResult): AddRowResult {
+  return {
+    success: result.success,
+    insertedCount: result.inserted_count,
+    error: result.error,
+    executedQuery: result.executed_query,
+  };
+}
+
+function toFrontendDeleteRowsResult(result: BackendDeleteRowsResult): DeleteRowsResult {
+  return {
+    success: result.success,
+    deletedCount: result.deleted_count,
+    error: result.error
+      ? {
+          message: result.error.message,
+          code: result.error.code,
+          detail: result.error.detail,
+          hint: result.error.hint,
+          table: result.error.table,
+          primaryKeyColumn: result.error.primary_key_column,
+        }
+      : undefined,
+    executedQuery: result.executed_query,
   };
 }
 
@@ -141,7 +319,8 @@ export const tauriCommands = {
   },
 
   async executeQuery(query: string): Promise<QueryResult> {
-    return invoke<QueryResult>('execute_query', { query });
+    const result = await invoke<BackendQueryResult>('execute_query', { query });
+    return toFrontendQueryResult(result);
   },
 
   async listTables(): Promise<string[]> {
@@ -182,6 +361,21 @@ export const tauriCommands = {
     return invoke<number>('ping_connection');
   },
 
+  async addRow(params: AddRowRequest): Promise<AddRowResult> {
+    const result = await invoke<BackendAddRowResult>('add_row', {
+      request: {
+        table_name: params.tableName,
+        values: params.values.map((value) => ({
+          column_name: value.columnName,
+          value: value.value,
+          use_default: value.useDefault,
+        })),
+      },
+    });
+
+    return toFrontendAddRowResult(result);
+  },
+
   async updateCell(params: UpdateCellRequest): Promise<UpdateCellResult> {
     const request = {
       table_name: params.tableName,
@@ -191,30 +385,36 @@ export const tauriCommands = {
       primary_key_value: params.primaryKeyValue,
     };
 
-    interface BackendUpdateCellResult {
-      success: boolean;
-      error?: {
-        message: string;
-        code?: string;
-        detail?: string;
-        hint?: string;
-        table: string;
-        column: string;
-      };
-      executed_query?: string;
-    }
-
     const result = await invoke<BackendUpdateCellResult>('update_cell', { request });
+    return toFrontendUpdateCellResult(result);
+  },
 
-    if (!result.success && result.error) {
-      throw new Error(formatUpdateCellError(result.error));
-    }
+  async deleteRows(params: DeleteRowsRequest): Promise<DeleteRowsResult> {
+    const result = await invoke<BackendDeleteRowsResult>('delete_rows', {
+      request: {
+        table_name: params.tableName,
+        primary_key_column: params.primaryKeyColumn,
+        primary_key_values: params.primaryKeyValues,
+      },
+    });
 
-    return {
-      success: result.success,
-      error: result.error,
-      executedQuery: result.executed_query,
-    };
+    return toFrontendDeleteRowsResult(result);
+  },
+
+  async applySchemaOperations(
+    params: ApplySchemaOperationsRequest
+  ): Promise<ApplySchemaOperationsResult> {
+    const result = await invoke<BackendApplySchemaOperationsResult>(
+      'apply_schema_operations',
+      {
+        request: {
+          table_name: params.tableName,
+          operations: params.operations.map(toBackendSchemaOperation),
+        },
+      }
+    );
+
+    return toFrontendApplySchemaOperationsResult(result);
   },
 };
 
