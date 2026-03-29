@@ -4,6 +4,7 @@ import {
   getCoreRowModel,
   getSortedRowModel,
   useReactTable,
+  type Cell,
   type ColumnDef,
   type Row,
   type SortingState,
@@ -15,13 +16,20 @@ import { Table, Checkbox, Group, Text, Button } from '@mantine/core';
 import { IconChevronUp, IconChevronDown, IconSelector } from '@tabler/icons-react';
 import styles from './DataTable.module.css';
 
-export type { ColumnDef, Row, SortingState, OnChangeFn, RowSelectionState };
+export type { Cell, ColumnDef, Row, SortingState, OnChangeFn, RowSelectionState };
 
 export interface RowProps {
   style?: CSSProperties;
   className?: string;
   onClick?: (e: React.MouseEvent<HTMLTableRowElement>) => void;
   onContextMenu?: (e: React.MouseEvent<HTMLTableRowElement>) => void;
+}
+
+export interface CellProps {
+  style?: CSSProperties;
+  className?: string;
+  onClick?: (e: React.MouseEvent<HTMLTableCellElement>) => void;
+  onContextMenu?: (e: React.MouseEvent<HTMLTableCellElement>) => void;
 }
 
 export interface DataTableProps<TData> {
@@ -34,6 +42,7 @@ export interface DataTableProps<TData> {
   className?: string;
   style?: CSSProperties;
   getRowProps?: (row: Row<TData>) => RowProps;
+  getCellProps?: (cell: Cell<TData, unknown>) => CellProps;
   enableSorting?: boolean;
   sorting?: SortingState;
   onSortingChange?: OnChangeFn<SortingState>;
@@ -66,6 +75,7 @@ export function DataTable<TData>({
   className,
   style,
   getRowProps,
+  getCellProps,
   enableSorting = false,
   sorting,
   onSortingChange,
@@ -264,14 +274,26 @@ export function DataTable<TData>({
               onClick={rowProps.onClick}
               onContextMenu={rowProps.onContextMenu}
             >
-              {row.getVisibleCells().map((cell) => (
-                <Table.Td
-                  key={cell.id}
-                  className={cell.column.id === '__select__' ? styles.checkboxCol : undefined}
-                >
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </Table.Td>
-              ))}
+              {row.getVisibleCells().map((cell) => {
+                const cellProps = getCellProps?.(cell) ?? {};
+
+                return (
+                  <Table.Td
+                    key={cell.id}
+                    style={cellProps.style}
+                    className={[
+                      cell.column.id === '__select__' ? styles.checkboxCol : '',
+                      cellProps.className ?? '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={cellProps.onClick}
+                    onContextMenu={cellProps.onContextMenu}
+                  >
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </Table.Td>
+                );
+              })}
             </Table.Tr>
           );
         })}

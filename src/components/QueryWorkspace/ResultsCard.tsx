@@ -9,7 +9,13 @@ import {
 } from '@mantine/core';
 import { IconAlertCircle, IconDownload, IconInfoCircle, IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
-import { type ColumnDef, type Row, type RowSelectionState, type OnChangeFn } from '@tanstack/react-table';
+import {
+  type Cell,
+  type ColumnDef,
+  type Row,
+  type RowSelectionState,
+  type OnChangeFn,
+} from '@tanstack/react-table';
 import { QueryResult } from '../../types/database';
 import { useSelectCell, useSelectedCell } from '../../stores/editCellStore';
 import {
@@ -48,26 +54,11 @@ function formatCellValue(value: unknown): string {
 // unika uwzględniania selectedCell w deps kolumn i nie powoduje
 // ich przebudowy przy każdym kliknięciu komórki.
 interface ResultCellProps {
-  rowIndex: number;
-  columnName: string;
   value: unknown;
-  rowData: Record<string, unknown>;
-  onCellClick: (rowIndex: number, columnName: string, rowData: Record<string, unknown>) => void;
 }
 
-function ResultCell({ rowIndex, columnName, value, rowData, onCellClick }: ResultCellProps) {
-  const selectedCell = useSelectedCell();
-  const isFocused =
-    selectedCell?.rowIndex === rowIndex && selectedCell?.columnName === columnName;
-
-  return (
-    <div
-      className={`${styles.cellClickable} ${isFocused ? styles.cellFocused : ''}`}
-      onClick={() => onCellClick(rowIndex, columnName, rowData)}
-    >
-      {formatCellValue(value)}
-    </div>
-  );
+function ResultCell({ value }: ResultCellProps) {
+  return formatCellValue(value);
 }
 
 export function ResultsCard({
@@ -78,6 +69,7 @@ export function ResultsCard({
   onOpenExportModal,
 }: ResultsCardProps) {
   const selectCell = useSelectCell();
+  const selectedCell = useSelectedCell();
   const loadedTable = useLoadedTable();
   const tableColumns = useTableColumns();
   const refreshTable = useRefreshTable();
@@ -129,12 +121,13 @@ export function ResultsCard({
           rowIndex,
           columnName,
           rowData,
+          visibleColumnNames: results?.columns ?? [],
           loadedTable,
           tableColumns,
         })
       );
     },
-    [tableColumns, selectCell, loadedTable]
+    [results?.columns, tableColumns, selectCell, loadedTable]
   );
 
   const columns = useMemo<ColumnDef<Record<string, unknown>, unknown>[]>(() => {
@@ -142,17 +135,28 @@ export function ResultsCard({
       id: col,
       accessorFn: (row) => row[col],
       header: col,
-      cell: ({ row, getValue }) => (
-        <ResultCell
-          rowIndex={row.index}
-          columnName={col}
-          value={getValue()}
-          rowData={row.original}
-          onCellClick={handleCellClick}
-        />
-      ),
+      cell: ({ getValue }) => <ResultCell value={getValue()} />,
     }));
-  }, [results?.columns, handleCellClick]);
+  }, [results?.columns]);
+
+  const getCellProps = useCallback(
+    (cell: Cell<Record<string, unknown>, unknown>) => {
+      const columnName = String(cell.column.id);
+
+      if (columnName === '__select__') {
+        return {};
+      }
+
+      const isFocused =
+        selectedCell?.rowIndex === cell.row.index && selectedCell?.columnName === columnName;
+
+      return {
+        className: `${styles.cellClickable} ${isFocused ? styles.cellFocused : ''}`.trim(),
+        onClick: () => handleCellClick(cell.row.index, columnName, cell.row.original),
+      };
+    },
+    [handleCellClick, selectedCell]
+  );
 
   const getRowProps = useCallback(
     (row: Row<Record<string, unknown>>) => ({
@@ -250,6 +254,7 @@ export function ResultsCard({
           rowSelection={rowSelection}
           onRowSelectionChange={handleRowSelectionChange}
           getRowProps={getRowProps}
+          getCellProps={getCellProps}
           className={`${styles.resultsTable} ${isExecuting ? styles.resultsTableExecuting : ''}`}
           estimatedRowHeight={36}
         />

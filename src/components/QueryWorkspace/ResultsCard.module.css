@@ -10,21 +10,19 @@
 
 .cellClickable {
     cursor: pointer;
-    display: block;
     user-select: none;
-    /* Expand the clickable area to fill the entire Td including its padding,
-       so the focus outline wraps the full visible cell, not just the text.
-       Mantine Table sets --table-vertical-spacing / --table-horizontal-spacing
-       on the <table> element; these are the same values applied as Td padding. */
-    margin: calc(var(--table-vertical-spacing, 7px) * -1)
-            calc(var(--table-horizontal-spacing, 10px) * -1);
-    padding: var(--table-vertical-spacing, 7px)
-             var(--table-horizontal-spacing, 10px);
 }
 
 .cellFocused {
-    outline: 2px dashed var(--mantine-primary-color-filled);
-    outline-offset: -2px;
+    position: relative;
+}
+
+.cellFocused::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 2px dashed var(--mantine-primary-color-filled);
+    pointer-events: none;
 }
 
 .tableContainer {

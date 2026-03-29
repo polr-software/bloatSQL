@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import {
   AppShell,
   Stack,
@@ -11,6 +11,7 @@ import {
   ScrollArea,
 } from '@mantine/core';
 import { SmartColumnInput } from './SmartColumnInput';
+import type { SmartColumnInputElement } from './SmartColumnInput';
 import { useForm } from '@mantine/form';
 import { IconCheck, IconX, IconAlertCircle, IconDeviceFloppy } from '@tabler/icons-react';
 import {
@@ -39,7 +40,7 @@ export function CellEditForm() {
   const setSaving = useSetSavingCell();
   const error = useEditCellError();
   const setError = useSetEditCellError();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<SmartColumnInputElement | null>(null);
   const [showSaved, setShowSaved] = useState(false);
 
   const form = useForm({
@@ -47,17 +48,21 @@ export function CellEditForm() {
     initialValues: buildCellEditInitialValues(selectedCell),
   });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (selectedCell) {
       const initialValues = buildCellEditInitialValues(selectedCell);
       form.setInitialValues(initialValues);
       form.reset();
       setShowSaved(false);
 
-      setTimeout(() => {
-        inputRef.current?.focus();
-        inputRef.current?.select();
-      }, 100);
+      inputRef.current?.focus();
+
+      if (
+        inputRef.current instanceof HTMLInputElement ||
+        inputRef.current instanceof HTMLTextAreaElement
+      ) {
+        inputRef.current.select();
+      }
     }
   }, [selectedCell]);
 
@@ -111,7 +116,13 @@ export function CellEditForm() {
     return null;
   }
 
-  const columnNames = Object.keys(selectedCell.rowData);
+  const visibleColumnNames = selectedCell.visibleColumnNames.filter(
+    (columnName) => columnName in selectedCell.rowData
+  );
+  const remainingColumnNames = Object.keys(selectedCell.rowData).filter(
+    (columnName) => !selectedCell.visibleColumnNames.includes(columnName)
+  );
+  const columnNames = [...visibleColumnNames, ...remainingColumnNames];
   const columnMeta = selectedCell.columns ?? [];
   const isDirty = form.isDirty();
 
@@ -177,7 +188,7 @@ export function CellEditForm() {
                   placeholder="Enter value"
                   disabled={isSaving || isPrimaryKey}
                   forceMultiline={isMultiline}
-                  inputRef={isFocused ? (dataType ? undefined : (inputRef as React.Ref<HTMLInputElement>)) : undefined}
+                  inputRef={isFocused ? inputRef : undefined}
                 />
               );
             })}

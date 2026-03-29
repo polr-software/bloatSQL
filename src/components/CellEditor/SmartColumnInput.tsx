@@ -3,6 +3,10 @@ import { TextInput, Textarea } from '@mantine/core';
 import { DateTimePicker, DatePickerInput } from '@mantine/dates';
 
 export type ColumnInputKind = 'datetime' | 'date' | 'textarea' | 'default';
+export type SmartColumnInputElement =
+  | HTMLInputElement
+  | HTMLTextAreaElement
+  | HTMLButtonElement;
 
 export function getColumnInputKind(dataType: string): ColumnInputKind {
   const dt = dataType.toLowerCase().trim();
@@ -57,7 +61,7 @@ interface SmartColumnInputProps {
   error?: ReactNode;
   /** Used only for 'default' fallback — forces multiline Textarea */
   forceMultiline?: boolean;
-  inputRef?: React.Ref<HTMLInputElement | HTMLTextAreaElement>;
+  inputRef?: React.Ref<SmartColumnInputElement>;
 }
 
 export function SmartColumnInput({
@@ -90,6 +94,7 @@ export function SmartColumnInput({
         error={error}
         valueFormat="YYYY-MM-DD HH:mm:ss"
         styles={inputStyles}
+        ref={inputRef as React.Ref<HTMLButtonElement>}
       />
     );
   }
@@ -108,6 +113,7 @@ export function SmartColumnInput({
         error={error}
         valueFormat="YYYY-MM-DD"
         styles={inputStyles}
+        ref={inputRef as React.Ref<HTMLButtonElement>}
       />
     );
   }

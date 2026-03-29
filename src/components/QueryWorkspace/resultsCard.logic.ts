@@ -9,6 +9,7 @@ interface BuildSelectedCellParams {
   rowIndex: number;
   columnName: string;
   rowData: Record<string, unknown>;
+  visibleColumnNames: string[];
   loadedTable: string | null;
   tableColumns: TableColumn[];
 }
@@ -17,6 +18,7 @@ export function buildSelectedCellData({
   rowIndex,
   columnName,
   rowData,
+  visibleColumnNames,
   loadedTable,
   tableColumns,
 }: BuildSelectedCellParams): CellEditData {
@@ -27,6 +29,7 @@ export function buildSelectedCellData({
     columnName,
     focusedColumn: columnName,
     rowData,
+    visibleColumnNames,
     tableName: loadedTable,
     primaryKeyColumn: primaryKeyColumn?.name,
     primaryKeyValue: primaryKeyColumn ? rowData[primaryKeyColumn.name] : undefined,

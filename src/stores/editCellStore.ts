@@ -6,6 +6,7 @@ export interface CellEditData {
   columnName: string;
   focusedColumn: string;
   rowData: Record<string, unknown>;
+  visibleColumnNames: string[];
   tableName: string | null;
   primaryKeyColumn?: string;
   primaryKeyValue?: unknown;
