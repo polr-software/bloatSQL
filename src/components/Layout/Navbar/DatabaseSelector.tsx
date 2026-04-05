@@ -1,7 +1,7 @@
 import { Select, Stack, Group, Text, Loader, Card, ThemeIcon, Tooltip, ActionIcon } from '@mantine/core';
 import { IconDatabase, IconPlugOff, IconRefresh, IconPencil } from '@tabler/icons-react';
 import { Led } from '@gfazioli/mantine-led';
-import { Connection } from '../../../types/database';
+import { type Connection } from '../../../connections';
 
 interface DatabaseSelectorProps {
   activeConnection: Connection | null;

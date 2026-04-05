@@ -15,8 +15,8 @@ import {
   IconX,
   IconSettings
 } from '@tabler/icons-react';
+import { type Connection } from '../../../connections';
 import { useWindowControls, useTauriContext } from '../../../tauri/TauriProvider';
-import { Connection } from '../../../types/database';
 import classes from './TitleBar.module.css';
 import { Led } from '@gfazioli/mantine-led';
 import '@gfazioli/mantine-led/styles.layer.css';

@@ -1,7 +1,7 @@
 import { Paper, Stack, Group, Text, Badge, Button, ActionIcon, Code, Tooltip } from '@mantine/core';
 import { IconArrowBack, IconX } from '@tabler/icons-react';
 import { AlterColumnOperation } from '../../../types/tableStructure';
-import { DatabaseType } from '../../../types/database';
+import { DatabaseType } from '../../../connections';
 import { getOperationPreviewSQL } from '../utils/alterTableSqlBuilder';
 
 interface PendingChangesPreviewProps {

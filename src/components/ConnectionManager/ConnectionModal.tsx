@@ -1,5 +1,5 @@
 import { Modal } from "@mantine/core";
-import { Connection } from "../../types/database";
+import { type Connection } from "../../connections";
 import { ConnectionForm } from "./ConnectionForm";
 
 type ConnectionModalProps = {

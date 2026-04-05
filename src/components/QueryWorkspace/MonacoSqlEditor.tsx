@@ -2,10 +2,9 @@ import { useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import Editor, { Monaco, OnMount } from '@monaco-editor/react';
 import { useMantineColorScheme } from '@mantine/core';
 import { editor as monacoEditor, languages, IDisposable } from 'monaco-editor';
+import { DatabaseType, useConnectionStore } from '../../connections';
 import { useTables } from '../../stores/databaseBrowserStore';
 import { useTableColumnsMap } from '../../stores/tableMetadataStore';
-import { useConnectionStore } from '../../stores/connectionStore';
-import { DatabaseType } from '../../types/database';
 import { sqlSnippets, convertSnippetToCompletion } from './sql-snippets';
 
 export interface MonacoSqlEditorRef {

@@ -1,7 +1,6 @@
 import { create } from 'zustand';
-import { DatabaseType } from '../types/database';
+import { DatabaseType, useConnectionStore } from '../connections';
 import { tauriCommands } from '../tauri/commands';
-import { useConnectionStore } from './connectionStore';
 import { useConsoleLogStore } from './consoleLogStore';
 import { useQueryExecutionStore } from './queryExecutionStore';
 import { schemaStore } from './schemaStore';

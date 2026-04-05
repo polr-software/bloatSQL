@@ -1,4 +1,4 @@
-import { DatabaseType } from '../types/database';
+import { DatabaseType } from '../connections';
 
 export const QUERY_TIMEOUT_MS = 30_000;
 

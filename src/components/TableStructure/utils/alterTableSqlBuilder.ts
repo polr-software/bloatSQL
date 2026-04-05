@@ -1,4 +1,4 @@
-import { DatabaseType } from '../../../types/database';
+import { DatabaseType } from '../../../connections';
 import { AlterColumnOperation, ColumnDefinition } from '../../../types/tableStructure';
 
 /**

@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Stack } from '@mantine/core';
-import { Connection } from '../../../types/database';
+import { type Connection } from '../../../connections';
 import { TitleBar } from './TitleBar';
 
 interface HeaderProps {

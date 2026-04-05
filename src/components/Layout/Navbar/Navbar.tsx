@@ -1,7 +1,7 @@
 import { memo, useState } from 'react';
 import { Stack, Center, Loader, AppShell, Button, Text, Box, ActionIcon, Group, Card, ScrollArea, TextInput, SegmentedControl, Code, Badge, rem, Paper } from '@mantine/core';
 import { IconPlus, IconDatabase, IconEdit, IconTrash, IconPlug, IconSearch, IconTable, IconHistory } from '@tabler/icons-react';
-import { Connection } from '../../../types/database';
+import { type Connection } from '../../../connections';
 import { QueryHistoryItem } from '../../../stores/queryHistoryStore';
 import { DatabaseTree } from './DatabaseTree';
 import { DatabaseSelector } from './DatabaseSelector';

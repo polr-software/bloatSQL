@@ -1,7 +1,7 @@
 import { create } from 'zustand';
+import { useConnectionStore } from '../connections';
 import { tauriCommands } from '../tauri/commands';
 import { QueryResult, TableColumn } from '../types/database';
-import { useConnectionStore } from './connectionStore';
 import { useConsoleLogStore } from './consoleLogStore';
 import { useEditCellStore } from './editCellStore';
 import { useQueryEditorStore } from './queryEditorStore';

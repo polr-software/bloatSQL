@@ -2,8 +2,8 @@ import { useEffect, useMemo } from 'react';
 import { Center, Loader, Stack, Text } from '@mantine/core';
 import { ReactFlowProvider } from '@xyflow/react';
 
+import { useConnectionStore } from '../../connections';
 import { useDiagramStore } from '../../stores/diagramStore';
-import { useConnectionStore } from '../../stores/connectionStore';
 import { useCurrentDatabase } from '../../stores/databaseBrowserStore';
 import {
   getSchemaCacheKey,

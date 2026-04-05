@@ -15,23 +15,16 @@ import {
 import { useForm } from '@mantine/form';
 import { IconAlertCircle, IconDownload } from '@tabler/icons-react';
 import { useState, useEffect } from 'react';
-import { Connection, DatabaseType } from '../../types/database';
-import { useConnectionStore } from '../../stores/connectionStore';
+import {
+  type Connection,
+  type ConnectionFormData,
+  DatabaseType,
+  useConnectionStore,
+} from '../../connections';
 
 interface ConnectionFormProps {
   connection?: Connection;
   onSuccess: () => void;
-}
-
-interface FormValues {
-  name: string;
-  dbType: DatabaseType;
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-  database: string;
-  sslMode: 'disabled' | 'preferred' | 'required';
 }
 
 export function ConnectionForm({ connection, onSuccess }: ConnectionFormProps) {
@@ -42,7 +35,7 @@ export function ConnectionForm({ connection, onSuccess }: ConnectionFormProps) {
   const [importUrl, setImportUrl] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
 
-  const form = useForm<FormValues>({
+  const form = useForm<ConnectionFormData>({
     initialValues: {
       name: connection?.name || '',
       dbType: connection?.dbType || DatabaseType.MariaDB,
@@ -90,7 +83,7 @@ export function ConnectionForm({ connection, onSuccess }: ConnectionFormProps) {
       }
       const url = new URL(urlString);
 
-      const values: Partial<FormValues> = {};
+      const values: Partial<ConnectionFormData> = {};
 
       if (url.protocol === 'postgresql:') {
         values.dbType = DatabaseType.PostgreSQL;

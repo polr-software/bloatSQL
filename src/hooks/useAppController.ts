@@ -11,7 +11,8 @@ import {
   useDeleteConnection,
   usePingMs,
   useMeasurePing,
-} from '../stores/connectionStore';
+  type Connection,
+} from '../connections';
 import {
   useQueryResults,
   useIsExecuting,
@@ -43,7 +44,6 @@ import { useSetSelectedTable as useSetTableViewSelected } from '../stores/tableV
 import { useStructureEditStore } from '../stores/structureEditStore';
 import { useEditCellStore } from '../stores/editCellStore';
 import { useAddQueryHistoryItem, useQueryHistory } from '../stores/queryHistoryStore';
-import { Connection } from '../types/database';
 import { tauriCommands } from '../tauri/commands';
 import { useNavigationHistory } from './useNavigationHistory';
 

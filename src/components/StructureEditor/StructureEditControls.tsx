@@ -9,8 +9,7 @@ import {
   useStructureEditError,
 } from '../../stores/structureEditStore';
 import { useSelectedTable } from '../../stores/tableViewStore';
-import { useActiveConnection } from '../../stores/connectionStore';
-import { DatabaseType } from '../../types/database';
+import { DatabaseType, useActiveConnection } from '../../connections';
 import { useApplyStructureChanges } from '../TableStructure/hooks/useApplyStructureChanges';
 import { useTableStructure } from '../TableStructure/hooks/useTableStructure';
 import { PendingChangesPreview } from '../TableStructure/components/PendingChangesPreview';

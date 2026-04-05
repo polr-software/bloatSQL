@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { useActiveConnection } from '../stores/connectionStore';
+import { useActiveConnection } from '../connections';
 import { useCurrentDatabase, useLoadTables } from '../stores/databaseBrowserStore';
 import { useLoadedTable, useRefreshTable } from '../stores/queryExecutionStore';
 import { useSchemaStore } from '../stores/schemaStore';

@@ -11,8 +11,7 @@ import {
   usePendingOperations,
   useStructureEditStore,
 } from "../../../stores/structureEditStore";
-import { useActiveConnection } from "../../../stores/connectionStore";
-import { DatabaseType } from "../../../types/database";
+import { DatabaseType, useActiveConnection } from "../../../connections";
 import { ConsoleLog } from "./ConsoleLog";
 import { PendingChangesPreview } from "../../TableStructure/components/PendingChangesPreview";
 

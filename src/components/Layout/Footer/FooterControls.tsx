@@ -13,7 +13,7 @@ import {
 import { StructureControls } from "./StructureControls";
 import { tauriCommands } from "../../../tauri/commands";
 import { useEditCellStore } from "../../../stores/editCellStore";
-import { useActiveConnection } from "../../../stores/connectionStore";
+import { useActiveConnection } from "../../../connections";
 import { useCurrentDatabase } from "../../../stores/databaseBrowserStore";
 import { getSchemaCacheKey, useSchemaStore } from "../../../stores/schemaStore";
 import {
