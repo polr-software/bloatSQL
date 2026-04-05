@@ -1,4 +1,6 @@
+mod catalog;
 mod export;
+mod model;
 mod queries;
 pub(super) mod types;
 

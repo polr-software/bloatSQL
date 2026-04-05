@@ -45,7 +45,7 @@ pub(super) fn escape_identifier(name: &str) -> String {
 
 #[inline]
 pub(super) fn escape_string(value: &str) -> String {
-    value.replace('\'', "''")
+    value.replace('\'', "''").replace('\0', "")
 }
 
 #[inline]
@@ -110,11 +110,18 @@ pub(super) fn pg_value_to_json(row: &Row, idx: usize, col_type: &Type) -> serde_
             })
             .unwrap_or(serde_json::Value::Null),
 
-        Type::TIMESTAMP | Type::TIMESTAMPTZ => row
+        Type::TIMESTAMP => row
             .try_get::<_, Option<chrono::NaiveDateTime>>(idx)
             .ok()
             .flatten()
             .map(|v| serde_json::Value::String(v.format("%Y-%m-%d %H:%M:%S").to_string()))
+            .unwrap_or(serde_json::Value::Null),
+
+        Type::TIMESTAMPTZ => row
+            .try_get::<_, Option<chrono::DateTime<chrono::Utc>>>(idx)
+            .ok()
+            .flatten()
+            .map(|v| serde_json::Value::String(v.to_rfc3339()))
             .unwrap_or(serde_json::Value::Null),
 
         Type::DATE => row
@@ -129,6 +136,13 @@ pub(super) fn pg_value_to_json(row: &Row, idx: usize, col_type: &Type) -> serde_
             .ok()
             .flatten()
             .map(|v| serde_json::Value::String(v.format("%H:%M:%S").to_string()))
+            .unwrap_or(serde_json::Value::Null),
+
+        Type::NUMERIC => row
+            .try_get::<_, Option<String>>(idx)
+            .ok()
+            .flatten()
+            .map(serde_json::Value::String)
             .unwrap_or(serde_json::Value::Null),
 
         Type::JSON | Type::JSONB => row
@@ -153,55 +167,14 @@ pub(super) fn pg_value_to_json(row: &Row, idx: usize, col_type: &Type) -> serde_
     }
 }
 
-#[inline]
-pub(super) fn pg_value_to_sql(row: &Row, idx: usize, col_type: &Type) -> String {
-    match *col_type {
-        Type::BOOL => row
-            .try_get::<_, Option<bool>>(idx)
-            .ok()
-            .flatten()
-            .map(|v| if v { "TRUE" } else { "FALSE" }.to_string())
-            .unwrap_or_else(|| "NULL".to_string()),
+#[cfg(test)]
+mod tests {
+    use super::escape_string;
 
-        Type::INT2 | Type::INT4 | Type::INT8 | Type::FLOAT4 | Type::FLOAT8 => row
-            .try_get::<_, Option<String>>(idx)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| "NULL".to_string()),
-
-        Type::VARCHAR | Type::TEXT | Type::CHAR | Type::BPCHAR | Type::NAME => row
-            .try_get::<_, Option<String>>(idx)
-            .ok()
-            .flatten()
-            .map(|v| format!("'{}'", escape_string(&v)))
-            .unwrap_or_else(|| "NULL".to_string()),
-
-        Type::TIMESTAMP | Type::TIMESTAMPTZ => row
-            .try_get::<_, Option<chrono::NaiveDateTime>>(idx)
-            .ok()
-            .flatten()
-            .map(|v| format!("'{}'", v.format("%Y-%m-%d %H:%M:%S")))
-            .unwrap_or_else(|| "NULL".to_string()),
-
-        Type::DATE => row
-            .try_get::<_, Option<chrono::NaiveDate>>(idx)
-            .ok()
-            .flatten()
-            .map(|v| format!("'{}'", v.format("%Y-%m-%d")))
-            .unwrap_or_else(|| "NULL".to_string()),
-
-        Type::TIME | Type::TIMETZ => row
-            .try_get::<_, Option<chrono::NaiveTime>>(idx)
-            .ok()
-            .flatten()
-            .map(|v| format!("'{}'", v.format("%H:%M:%S")))
-            .unwrap_or_else(|| "NULL".to_string()),
-
-        _ => row
-            .try_get::<_, Option<String>>(idx)
-            .ok()
-            .flatten()
-            .map(|v| format!("'{}'", escape_string(&v)))
-            .unwrap_or_else(|| "NULL".to_string()),
+    #[test]
+    fn escape_string_keeps_backslashes_intact() {
+        assert_eq!(escape_string(r"C:\temp\file.txt"), r"C:\temp\file.txt");
+        assert_eq!(escape_string("it's fine"), "it''s fine");
+        assert_eq!(escape_string("a\0b"), "ab");
     }
 }

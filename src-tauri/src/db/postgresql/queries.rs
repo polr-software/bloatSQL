@@ -1,3 +1,4 @@
+use super::catalog::PostgresCatalog;
 use super::types::{escape_identifier, escape_string, pg_error_to_query_error, pg_value_to_json};
 use super::PostgresConnection;
 use crate::db::connection::{
@@ -93,32 +94,20 @@ impl PostgresConnection {
 
     pub(super) async fn impl_list_tables(&self) -> DbResult<Vec<String>> {
         let client = self.client.lock().await;
+        let catalog = PostgresCatalog::new(&client);
 
-        let query = "SELECT table_name FROM information_schema.tables
-                     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-                     ORDER BY table_name";
-
-        let rows = timeout(DEFAULT_QUERY_TIMEOUT, client.query(query, &[]))
+        timeout(DEFAULT_QUERY_TIMEOUT, catalog.load_public_table_names())
             .await
             .map_err(|_| QueryError::timed_out())?
-            .map_err(QueryError::for_query)?;
-
-        Ok(rows.iter().filter_map(|row| row.try_get::<_, String>(0).ok()).collect())
     }
 
     pub(super) async fn impl_list_databases(&self) -> DbResult<Vec<String>> {
         let client = self.client.lock().await;
+        let catalog = PostgresCatalog::new(&client);
 
-        let query = "SELECT datname FROM pg_database
-                     WHERE datistemplate = false
-                     ORDER BY datname";
-
-        let rows = timeout(DEFAULT_QUERY_TIMEOUT, client.query(query, &[]))
+        timeout(DEFAULT_QUERY_TIMEOUT, catalog.load_database_names())
             .await
             .map_err(|_| QueryError::timed_out())?
-            .map_err(QueryError::for_query)?;
-
-        Ok(rows.iter().filter_map(|row| row.try_get::<_, String>(0).ok()).collect())
     }
 
     pub(super) async fn impl_change_database(&self, database_name: &str) -> DbResult<()> {
@@ -151,91 +140,20 @@ impl PostgresConnection {
         table_name: &str,
     ) -> DbResult<Vec<TableColumn>> {
         let client = self.client.lock().await;
+        let catalog = PostgresCatalog::new(&client);
 
-        let query = "SELECT
-                        c.column_name,
-                        c.udt_name,
-                        c.is_nullable,
-                        CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary,
-                        c.column_default,
-                        c.character_maximum_length,
-                        c.numeric_precision
-                     FROM information_schema.columns c
-                     LEFT JOIN (
-                        SELECT ku.column_name
-                        FROM information_schema.table_constraints tc
-                        JOIN information_schema.key_column_usage ku
-                            ON tc.constraint_name = ku.constraint_name
-                        WHERE tc.constraint_type = 'PRIMARY KEY'
-                            AND tc.table_name = $1
-                            AND tc.table_schema = 'public'
-                     ) pk ON c.column_name = pk.column_name
-                     WHERE c.table_name = $1
-                        AND c.table_schema = 'public'
-                     ORDER BY c.ordinal_position";
-
-        let rows = timeout(DEFAULT_QUERY_TIMEOUT, client.query(query, &[&table_name]))
+        timeout(DEFAULT_QUERY_TIMEOUT, catalog.load_table_columns(table_name))
             .await
             .map_err(|_| QueryError::timed_out())?
-            .map_err(QueryError::for_query)?;
-
-        let columns = rows
-            .iter()
-            .filter_map(|row| {
-                Some(TableColumn {
-                    name: row.try_get::<_, String>(0).ok()?,
-                    data_type: row.try_get::<_, String>(1).ok()?,
-                    is_nullable: row.try_get::<_, String>(2).ok()? == "YES",
-                    is_primary_key: row.try_get::<_, bool>(3).ok()?,
-                    column_default: row.try_get::<_, String>(4).ok(),
-                    character_maximum_length: row.try_get::<_, i32>(5).ok().map(|v| v as i64),
-                    numeric_precision: row.try_get::<_, i32>(6).ok().map(|v| v as i64),
-                })
-            })
-            .collect();
-
-        Ok(columns)
     }
 
     pub(super) async fn impl_get_table_relationships(&self) -> DbResult<Vec<TableRelationship>> {
         let client = self.client.lock().await;
+        let catalog = PostgresCatalog::new(&client);
 
-        let query = "SELECT
-                        tc.table_name AS from_table,
-                        kcu.column_name AS from_column,
-                        ccu.table_name AS to_table,
-                        ccu.column_name AS to_column,
-                        tc.constraint_name
-                     FROM information_schema.table_constraints tc
-                     JOIN information_schema.key_column_usage kcu
-                        ON tc.constraint_name = kcu.constraint_name
-                        AND tc.table_schema = kcu.table_schema
-                     JOIN information_schema.constraint_column_usage ccu
-                        ON ccu.constraint_name = tc.constraint_name
-                        AND ccu.table_schema = tc.table_schema
-                     WHERE tc.constraint_type = 'FOREIGN KEY'
-                        AND tc.table_schema = 'public'
-                     ORDER BY tc.table_name";
-
-        let rows = timeout(DEFAULT_QUERY_TIMEOUT, client.query(query, &[]))
+        timeout(DEFAULT_QUERY_TIMEOUT, catalog.load_table_relationships())
             .await
             .map_err(|_| QueryError::timed_out())?
-            .map_err(QueryError::for_query)?;
-
-        let relationships = rows
-            .iter()
-            .filter_map(|row| {
-                Some(TableRelationship {
-                    from_table: row.try_get::<_, String>(0).ok()?,
-                    from_column: row.try_get::<_, String>(1).ok()?,
-                    to_table: row.try_get::<_, String>(2).ok()?,
-                    to_column: row.try_get::<_, String>(3).ok()?,
-                    constraint_name: row.try_get::<_, String>(4).ok()?,
-                })
-            })
-            .collect();
-
-        Ok(relationships)
     }
 
     pub(super) async fn impl_update_cell(
